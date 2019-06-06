@@ -396,7 +396,7 @@ export function buildTree(cursor: BufferCursor, maxBufferLength: number, distrib
       localChildren.reverse(); localPositions.reverse()
       if (type & TYPE_TAGGED) {
         if (distribute && localChildren.length > BALANCE_BRANCH_FACTOR)
-          ({children: localChildren, positions: localPositions} = balanceRange(0, localChildren, localPositions, 0, localChildren.length))
+          ({children: localChildren, positions: localPositions} = balanceRange(0, localChildren, localPositions, 0, localChildren.length, 0))
         children.push(new Tree(localChildren, localPositions, type, end - start))
       } else {
         children.push(balanceRange(type, localChildren, localPositions, 0, localChildren.length))
@@ -407,8 +407,8 @@ export function buildTree(cursor: BufferCursor, maxBufferLength: number, distrib
 
   function balanceRange(type: number,
                         children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
-                        from: number, to: number): Tree {
-    let start = positions[from], length = (positions[to - 1] + children[to - 1].length) - start
+                        from: number, to: number, start = positions[from]): Tree {
+    let length = (positions[to - 1] + children[to - 1].length) - start
     if (from == to - 1 && start == 0) {
       let first = children[from]
       if (first instanceof Tree) return first
@@ -502,7 +502,7 @@ export function buildTree(cursor: BufferCursor, maxBufferLength: number, distrib
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
   children.reverse(); positions.reverse()
   if (distribute && children.length > BALANCE_BRANCH_FACTOR)
-    ({children, positions} = balanceRange(0, children, positions, 0, children.length))
+    ({children, positions} = balanceRange(0, children, positions, 0, children.length, 0))
   return new Tree(children, positions)
 }
 

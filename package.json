@@ -11,6 +11,6 @@
   },
   "scripts": {
     "watch": "tsc --outDir dist -w -d",
-    "prepate": "tsc --outDir dist -d"
+    "prepare": "tsc --outDir dist -d"
   }
 }
