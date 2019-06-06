@@ -1,0 +1,4 @@
+/node_modules/
+/dist/*
+.tern-*
+.rpt2_cache
