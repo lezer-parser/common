@@ -176,6 +176,11 @@ export class Tree extends Subtree {
     return new Tree(this.children.concat(other.children), this.positions.concat(other.positions))
   }
 
+  balance(maxBufferLength = DEFAULT_BUFFER_LENGTH) {
+    return this.children.length <= BALANCE_BRANCH_FACTOR ? this :
+      balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0, maxBufferLength)
+  }
+
   static fromBuffer(buffer: readonly number[], maxBufferLength = DEFAULT_BUFFER_LENGTH): Tree {
     return buildTree(new FlatBufferCursor(buffer, buffer.length), maxBufferLength, [])
   }
