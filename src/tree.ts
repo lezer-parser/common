@@ -247,7 +247,7 @@ export class TreeBuffer {
     let endIndex = index + (count << 2)
     if (start > to) return this.buffer.length
     if (end >= from && enter(type, start, end) !== false) {
-      while (index < endIndex) this.iterChild(from, to, offset, index, enter, leave)
+      while (index < endIndex) index = this.iterChild(from, to, offset, index, enter, leave)
       if (leave) leave(type, start, end)
     }
     return endIndex
