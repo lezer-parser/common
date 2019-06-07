@@ -401,66 +401,9 @@ function buildTree(cursor: BufferCursor, maxBufferLength: number, reused: Tree[]
       if (type & TYPE_TAGGED)
         children.push(new Tree(localChildren, localPositions, type, end - start))
       else
-        children.push(balanceRange(type, localChildren, localPositions, 0, localChildren.length))
+        children.push(balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength))
       positions.push(start - parentStart)
     }
-  }
-
-  function balanceRange(type: number,
-                        children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
-                        from: number, to: number, start = positions[from]): Tree {
-    let length = (positions[to - 1] + children[to - 1].length) - start
-    if (from == to - 1 && start == 0) {
-      let first = children[from]
-      if (first instanceof Tree) return first
-    }
-    let localChildren = [], localPositions = []
-    if (length <= maxBufferLength) {
-      for (let i = from; i < to; i++) {
-        let child = children[i]
-        if (child instanceof Tree && child.type == type) {
-          // Unwrap child with same type
-          for (let j = 0; j < child.children.length; j++) {
-            localChildren.push(child.children[j])
-            localPositions.push(positions[i] + child.positions[j] - start)
-          }
-        } else {
-          localChildren.push(child)
-          localPositions.push(positions[i] - start)
-        }
-      }
-    } else {
-      let maxChild = Math.max(maxBufferLength, Math.ceil(length / BALANCE_BRANCH_FACTOR))
-      for (let i = from; i < to;) {
-        let groupFrom = i, groupStart = positions[i]
-        i++
-        for (; i < to; i++) {
-          let nextEnd = positions[i] + children[i].length
-          if (nextEnd - groupStart > maxChild) break
-        }
-        if (i == groupFrom + 1) {
-          let only = children[groupFrom]
-          if (only instanceof Tree && only.type == type) {
-            // Already wrapped
-            if (only.length > maxChild << 1) { // Too big, collapse
-              for (let j = 0; j < only.children.length; j++) {
-                localChildren.push(only.children[j])
-                localPositions.push(only.positions[j] + groupStart - start)
-              }
-              continue
-            }
-          } else {
-            // Wrap with our type to make reuse possible
-            only = new Tree([only], [0], type, only.length)
-          }
-          localChildren.push(only)
-        } else {
-          localChildren.push(balanceRange(type, children, positions, groupFrom, i))
-        }
-        localPositions.push(groupStart - start)
-      }
-    }
-    return new Tree(localChildren, localPositions, type, length)
   }
 
   function findBufferSize(maxSize: number) {
@@ -502,6 +445,64 @@ function buildTree(cursor: BufferCursor, maxBufferLength: number, reused: Tree[]
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
   return new Tree(children.reverse(), positions.reverse())
+}
+
+function balanceRange(type: number,
+                      children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
+                      from: number, to: number,
+                      start: number, maxBufferLength: number): Tree {
+  let length = (positions[to - 1] + children[to - 1].length) - start
+  if (from == to - 1 && start == 0) {
+    let first = children[from]
+    if (first instanceof Tree) return first
+  }
+  let localChildren = [], localPositions = []
+  if (length <= maxBufferLength) {
+    for (let i = from; i < to; i++) {
+      let child = children[i]
+      if (child instanceof Tree && child.type == type) {
+        // Unwrap child with same type
+        for (let j = 0; j < child.children.length; j++) {
+          localChildren.push(child.children[j])
+          localPositions.push(positions[i] + child.positions[j] - start)
+        }
+      } else {
+        localChildren.push(child)
+        localPositions.push(positions[i] - start)
+      }
+    }
+  } else {
+    let maxChild = Math.max(maxBufferLength, Math.ceil(length / BALANCE_BRANCH_FACTOR))
+    for (let i = from; i < to;) {
+      let groupFrom = i, groupStart = positions[i]
+      i++
+      for (; i < to; i++) {
+        let nextEnd = positions[i] + children[i].length
+        if (nextEnd - groupStart > maxChild) break
+      }
+      if (i == groupFrom + 1) {
+        let only = children[groupFrom]
+        if (only instanceof Tree && only.type == type) {
+          // Already wrapped
+          if (only.length > maxChild << 1) { // Too big, collapse
+            for (let j = 0; j < only.children.length; j++) {
+              localChildren.push(only.children[j])
+              localPositions.push(only.positions[j] + groupStart - start)
+            }
+            continue
+          }
+        } else {
+          // Wrap with our type to make reuse possible
+          only = new Tree([only], [0], type, only.length)
+        }
+        localChildren.push(only)
+      } else {
+        localChildren.push(balanceRange(type, children, positions, groupFrom, i, groupStart, maxBufferLength))
+      }
+      localPositions.push(groupStart - start)
+    }
+  }
+  return new Tree(localChildren, localPositions, type, length)
 }
 
 export class TagMap<T> {
