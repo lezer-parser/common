@@ -177,7 +177,11 @@ export class Tree extends Subtree {
   }
 
   static fromBuffer(buffer: readonly number[], maxBufferLength = DEFAULT_BUFFER_LENGTH): Tree {
-    return buildTree(new FlatBufferCursor(buffer, buffer.length), maxBufferLength, true)
+    return buildTree(new FlatBufferCursor(buffer, buffer.length), maxBufferLength, [])
+  }
+
+  static build(cursor: BufferCursor, maxBufferLength: number = DEFAULT_BUFFER_LENGTH, reused: Tree[] = []) {
+    return buildTree(cursor, maxBufferLength, reused)
   }
 }
 
@@ -372,7 +376,7 @@ class FlatBufferCursor implements BufferCursor {
 
 const BALANCE_BRANCH_FACTOR = 8
 
-export function buildTree(cursor: BufferCursor, maxBufferLength: number, distribute: boolean, reused: Tree[] = []): Tree {
+function buildTree(cursor: BufferCursor, maxBufferLength: number, reused: Tree[]): Tree {
   function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
     let {type, start, end, size} = cursor, buffer!: {size: number, start: number} | null
     if (size == REUSED_VALUE) {
@@ -394,13 +398,10 @@ export function buildTree(cursor: BufferCursor, maxBufferLength: number, distrib
       while (cursor.pos > endPos)
         takeNode(start, endPos, localChildren, localPositions)
       localChildren.reverse(); localPositions.reverse()
-      if (type & TYPE_TAGGED) {
-        if (distribute && localChildren.length > BALANCE_BRANCH_FACTOR)
-          ({children: localChildren, positions: localPositions} = balanceRange(0, localChildren, localPositions, 0, localChildren.length, 0))
+      if (type & TYPE_TAGGED)
         children.push(new Tree(localChildren, localPositions, type, end - start))
-      } else {
+      else
         children.push(balanceRange(type, localChildren, localPositions, 0, localChildren.length))
-      }
       positions.push(start - parentStart)
     }
   }
@@ -500,10 +501,7 @@ export function buildTree(cursor: BufferCursor, maxBufferLength: number, distrib
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
-  children.reverse(); positions.reverse()
-  if (distribute && children.length > BALANCE_BRANCH_FACTOR)
-    ({children, positions} = balanceRange(0, children, positions, 0, children.length, 0))
-  return new Tree(children, positions)
+  return new Tree(children.reverse(), positions.reverse())
 }
 
 export class TagMap<T> {
