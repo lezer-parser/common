@@ -37,6 +37,19 @@ export abstract class Subtree {
 
   abstract childBefore(pos: number): Subtree | null
   abstract childAfter(pos: number): Subtree | null
+
+  get firstChild() { return this.childAfter(this.start - 1) }
+  get lastChild() { return this.childBefore(this.end + 1) }
+
+  enter(pos: number, side: -1 | 1) {
+    let result: Subtree = this
+    for (;;) {
+      let child = (side < 0 ? result.childBefore(pos) : result.childAfter(pos))
+      if (!child || (side < 0 ? child.end : child.start) != pos) break
+      result = child
+    }
+    return result
+  }
 }
 
 // Only the top-level object of this class is directly exposed to
