@@ -116,14 +116,23 @@ export class Tree extends Subtree {
   iterInner(from: number, to: number, offset: number,
             enter: (type: number, start: number, end: number) => any,
             leave?: (type: number, start: number, end: number) => void) {
-    if ((this.type & TYPE_TAGGED) != 0 &&
+    if ((this.type & TYPE_TAGGED) &&
         enter(this.type, offset, offset + this.length) === false) return
-    for (let i = 0; i < this.children.length; i++) {
-      let child = this.children[i], start = this.positions[i] + offset, end = start + child.length
-      if (start > to) break
-      if (end < from) continue
-      child.iterInner(from, to, start, enter, leave)
-    }
+    if (from <= to) {
+      for (let i = 0; i < this.children.length; i++) {
+        let child = this.children[i], start = this.positions[i] + offset, end = start + child.length
+        if (start > to) break
+        if (end < from) continue
+        child.iterInner(from, to, start, enter, leave)
+      }
+    } else {
+      for (let i = this.children.length - 1; i >= 0; i--) {
+        let child = this.children[i], start = this.positions[i] + offset, end = start + child.length
+        if (end < to) break
+        if (start > from) continue
+        child.iterInner(from, to, start, enter, leave)
+      }
+    }      
     if (leave && (this.type & TYPE_TAGGED)) leave(this.type, offset, offset + this.length)
   }
 
@@ -240,8 +249,12 @@ export class TreeBuffer {
   iterInner(from: number, to: number, offset: number,
             enter: (type: number, start: number, end: number) => any,
             leave?: (type: number, start: number, end: number) => void) {
-    for (let index = 0; index < this.buffer.length;)
-      index = this.iterChild(from, to, offset, index, enter, leave)
+    if (from <= to) {
+      for (let index = 0; index < this.buffer.length;)
+        index = this.iterChild(from, to, offset, index, enter, leave)
+    } else {
+      this.iterRev(from, to, offset, 0, this.buffer.length, enter, leave)
+    }
   }
 
   iterChild(from: number, to: number, offset: number, index: number,
@@ -256,6 +269,61 @@ export class TreeBuffer {
       if (leave) leave(type, start, end)
     }
     return endIndex
+  }
+
+  private parentNodesByEnd(startIndex: number, endIndex: number) {
+    // Build up an array of node indices reflecting the order in which
+    // non-empty nodes end, to avoid having to scan for parent nodes
+    // at every position during reverse iteration.
+    let order: number[] = []
+    let scan = (index: number) => {
+      let count = this.buffer[index + 3]
+      let end = index + ((count + 1) << 2)
+      if (count == 0) return end
+      for (let i = index + 4; i < end;) i = scan(i)
+      order.push(index)
+      return end
+    }
+    for (let index = startIndex; index < endIndex;) index = scan(index)
+    return order
+  }
+
+  iterRev(from: number, to: number, offset: number, startIndex: number, endIndex: number,
+          enter: (type: number, start: number, end: number) => any,
+          leave?: (type: number, start: number, end: number) => void) {
+    let endOrder = this.parentNodesByEnd(startIndex, endIndex)
+    // Index range for the next non-empty node
+    let nextStart = -1, nextEnd = -1
+    let takeNext = () => {
+      if (endOrder.length > 0) {
+        nextStart = endOrder.pop()!
+        nextEnd = nextStart + ((this.buffer[nextStart + 3] + 1) << 2)
+      } else {
+        nextEnd = -1
+      }
+    }
+    takeNext()
+
+    run: for (let index = endIndex; index > startIndex;) {
+      while (nextEnd == index) {
+        let base = nextStart
+        let type = this.buffer[base], start = this.buffer[base + 1] + offset, end = this.buffer[base + 2] + offset
+        takeNext()
+        if (start <= from && end >= to) {
+          if (enter(type, start, end) === false) {
+            // Skip the entire node
+            index = base
+            while (nextEnd > base) takeNext()
+            continue run
+          }
+        }
+      }
+      let count = this.buffer[--index], end = this.buffer[--index] + offset,
+        start = this.buffer[--index] + offset, type = this.buffer[--index]
+      if (start > from || end < to) continue
+      if ((count > 0 || enter(type, start, end) !== false) && leave)
+        leave(type, start, end)
+    }
   }
 
   findIndex(pos: number, side: number, start: number, from: number, to: number) {
@@ -305,7 +373,7 @@ class NodeSubtree extends Subtree {
   iterate(from: number, to: number,
           enter: (type: number, start: number, end: number) => any,
           leave?: (type: number, start: number, end: number) => void) {
-    return this.node.iterInner(from, to, this.start, enter, leave)
+    this.node.iterInner(from, to, this.start, enter, leave)
   }
 }
 
@@ -336,7 +404,10 @@ class BufferSubtree extends Subtree {
   iterate(from: number, to: number,
           enter: (type: number, start: number, end: number) => any,
           leave?: (type: number, start: number, end: number) => void) {
-    this.buffer.iterChild(from, to, this.bufferStart, this.index, enter, leave)
+    if (from <= to)
+      this.buffer.iterChild(from, to, this.bufferStart, this.index, enter, leave)
+    else
+      this.buffer.iterRev(from, to, this.bufferStart, this.index, this.endIndex, enter, leave)
   }
 
   resolve(pos: number): Subtree {
