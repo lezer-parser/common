@@ -50,23 +50,27 @@ export abstract class Subtree {
 
   abstract iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc): T | undefined
 
-  abstract resolve(pos: number): Subtree
-
-  abstract childBefore(pos: number): Subtree | null
-  abstract childAfter(pos: number): Subtree | null
-
-  get firstChild() { return this.childAfter(this.start - 1) }
-  get lastChild() { return this.childBefore(this.end + 1) }
-
-  enter(pos: number, side: -1 | 1) {
-    let result: Subtree = this
-    for (;;) {
+  resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
+    let result = this.resolveAt(pos)
+    // FIXME this is slightly inefficient in that it scans the result
+    // of resolveAt twice (but further complicating child-finding
+    // logic seems unattractive as well)
+    if (side != 0) for (;;) {
       let child = (side < 0 ? result.childBefore(pos) : result.childAfter(pos))
       if (!child || (side < 0 ? child.end : child.start) != pos) break
       result = child
     }
     return result
   }
+
+  // @internal
+  abstract resolveAt(pos: number): Subtree
+
+  abstract childBefore(pos: number): Subtree | null
+  abstract childAfter(pos: number): Subtree | null
+
+  get firstChild() { return this.childAfter(this.start - 1) }
+  get lastChild() { return this.childBefore(this.end + 1) }
 }
 
 // Only the top-level object of this class is directly exposed to
@@ -166,7 +170,7 @@ export class Tree extends Subtree {
     return
   }
 
-  resolve(pos: number): Subtree {
+  resolveAt(pos: number, side: -1 | 0 | 1 = 0): Subtree {
     return this.resolveInner(pos, 0, this)
   }
 
@@ -207,7 +211,7 @@ export class Tree extends Subtree {
   // @internal
   resolveInner(pos: number, start: number, parent: Subtree): Subtree {
     let found = this.findChild(pos, 0, start, parent)
-    return found ? found.resolve(pos) : parent
+    return found ? found.resolveAt(pos) : parent
   }
 
   append(other: Tree) {
@@ -378,9 +382,9 @@ class NodeSubtree extends Subtree {
 
   get end() { return this.start + this.node.length }
 
-  resolve(pos: number): Subtree {
+  resolveAt(pos: number): Subtree {
     if (pos <= this.start || pos >= this.end)
-      return this.parent.resolve(pos)
+      return this.parent.resolveAt(pos)
     return this.node.resolveInner(pos, this.start, this)
   }
 
@@ -434,10 +438,10 @@ class BufferSubtree extends Subtree {
     return iter.result
   }
 
-  resolve(pos: number): Subtree {
-    if (pos <= this.start || pos >= this.end) return this.parent.resolve(pos)
+  resolveAt(pos: number): Subtree {
+    if (pos <= this.start || pos >= this.end) return this.parent.resolveAt(pos)
     let found = this.buffer.findIndex(pos, 0, this.bufferStart, this.index + 4, this.endIndex)
-    return found < 0 ? this : new BufferSubtree(this.buffer, this.bufferStart, found, this).resolve(pos)
+    return found < 0 ? this : new BufferSubtree(this.buffer, this.bufferStart, found, this).resolveAt(pos)
   }
 
   toString(tags?: TagMap<any>) {
