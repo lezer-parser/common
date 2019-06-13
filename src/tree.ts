@@ -514,12 +514,24 @@ function buildTree(cursor: BufferCursor, maxBufferLength: number, reused: Tree[]
       while (cursor.pos > endPos)
         takeNode(start, endPos, localChildren, localPositions)
       localChildren.reverse(); localPositions.reverse()
-      if (type & TYPE_TAGGED)
-        children.push(new Tree(localChildren, localPositions, type, end - start))
-      else
-        children.push(balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength))
+      children.push(new Tree(localChildren, localPositions, type, end - start))
+      // End of a (possible) sequence of repeating nodes—might need to balance
+      if ((type & TYPE_TAGGED) == 0 && (cursor.pos == 0 || cursor.type != type))
+        maybeBalanceSiblings(children, positions, type)
       positions.push(start - parentStart)
     }
+  }
+
+  function maybeBalanceSiblings(children: (Tree | TreeBuffer)[], positions: number[], type: number) {
+    let to = children.length, from = to - 1
+    for (; from > 0; from--) {
+      let prev = children[from - 1]
+      if (!(prev instanceof Tree) || prev.type != type) break
+    }
+    if (to - from < BALANCE_BRANCH_FACTOR) return
+    let wrapped = balanceRange(type, children, positions, from, to, positions[from], maxBufferLength)
+    children.length = positions.length = from + 1
+    children[from] = wrapped
   }
 
   function findBufferSize(maxSize: number) {
