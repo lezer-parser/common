@@ -96,7 +96,7 @@ export class Tree extends Subtree {
 
   get end() { return this.length }
 
-  partial(start: number, end: number, offset: number, children: (Tree | TreeBuffer)[], positions: number[]) {
+  private partial(start: number, end: number, offset: number, children: (Tree | TreeBuffer)[], positions: number[]) {
     for (let i = 0; i < this.children.length; i++) {
       let from = this.positions[i]
       if (from > end) break
@@ -114,12 +114,24 @@ export class Tree extends Subtree {
   unchanged(changes: readonly ChangedRange[]) {
     if (changes.length == 0) return this
     let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
+
+    function cutAt(tree: Tree, pos: number, side: -1 | 1) {
+      let sub = tree.resolve(pos)
+      for (let cur = pos;;) {
+        let sibling = side < 0 ? sub.childBefore(cur) : sub.childAfter(cur)
+        if (sibling) return side < 0 ? sibling.end - 1 : sibling.start + 1
+        if (!sub.parent) return side < 0 ? 0 : 1e9
+        cur = side < 0 ? sub.start : sub.end
+        sub = sub.parent!
+      }
+    }
+
     for (let i = 0, pos = 0, off = 0;; i++) {
       let next = i == changes.length ? null : changes[i]
-      let nextPos = next ? next.fromA : this.length
-      if (nextPos > pos) this.partial(pos, nextPos - 1 /* FIXME need a full (non-skipped) token here */, off, children, positions)
+      let nextPos = next ? cutAt(this, next.fromA, -1) : this.length
+      if (nextPos > pos) this.partial(pos, nextPos, off, children, positions)
       if (!next) break
-      pos = next.toA
+      pos = cutAt(this, next.toA, 1)
       off += (next.toB - next.fromB) - (next.toA - next.fromA)
     }
     return new Tree(children, positions)
