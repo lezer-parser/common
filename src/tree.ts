@@ -247,11 +247,12 @@ export class Tree extends Subtree {
 
 Tree.prototype.parent = null
 
-// Tree buffers contain type,start,end,childCount quads for each node.
-// The nodes are built in postfix order (with parent nodes being
-// written after child nodes), but converted to prefix order when
-// wrapped in a TreeBuffer.
+// Tree buffers contain (type, start, end, endIndex) quads for each
+// node. In such a buffer, nodes are stored in prefix order (parents
+// before children, with the endIndex of the parent indicating which
+// children belong to it)
 export class TreeBuffer {
+  // FIXME store a type in here to efficiently represent nodes whose children all fit in a buffer (esp repeat nodes)?
   constructor(readonly buffer: Uint16Array, readonly length: number) {}
 
   get nodeCount() { return this.buffer.length >> 2 }
@@ -264,13 +265,12 @@ export class TreeBuffer {
   }
 
   childToString(index: number, parts: string[], tags?: TagMap<any>): number {
-    let type = this.buffer[index], count = this.buffer[index + 3]
+    let type = this.buffer[index], endIndex = this.buffer[index + 3]
     let result = String(tags ? tags.get(type)! : type)
     index += 4
-    if (count) {
+    if (endIndex > index) {
       let children: string[] = []
-      for (let end = index + (count << 2); index < end;)
-        index = this.childToString(index, children, tags)
+      while (index < endIndex) index = this.childToString(index, children, tags)
       result += "(" + children.join(",") + ")"
     }
     parts.push(result)
@@ -285,7 +285,7 @@ export class TreeBuffer {
       newBuffer[i] = this.buffer[i]
       newBuffer[i + 1] = this.buffer[i + 1]
       newBuffer[i + 2] = Math.min(at, this.buffer[i + 2])
-      newBuffer[i + 3] = Math.min(this.buffer[i + 3], ((cutPoint - i) >> 2) - 1)
+      newBuffer[i + 3] = Math.min(this.buffer[i + 3], cutPoint)
     }
     return new TreeBuffer(newBuffer, Math.min(at, this.length))
   }
@@ -301,8 +301,7 @@ export class TreeBuffer {
 
   iterChild<T>(from: number, to: number, offset: number, index: number, iter: Iteration<T>) {
     let type = this.buffer[index++], start = this.buffer[index++] + offset,
-        end = this.buffer[index++] + offset, count = this.buffer[index++]
-    let endIndex = index + (count << 2)
+        end = this.buffer[index++] + offset, endIndex = this.buffer[index++]
     if (start > to) return this.buffer.length
     if (end >= from && iter.doEnter(type, start, end)) {
       while (index < endIndex && !iter.done) index = this.iterChild(from, to, offset, index, iter)
@@ -317,9 +316,8 @@ export class TreeBuffer {
     // at every position during reverse iteration.
     let order: number[] = []
     let scan = (index: number) => {
-      let count = this.buffer[index + 3]
-      let end = index + ((count + 1) << 2)
-      if (count == 0) return end
+      let end = this.buffer[index + 3]
+      if (end == index + 4) return end
       for (let i = index + 4; i < end;) i = scan(i)
       order.push(index)
       return end
@@ -335,7 +333,7 @@ export class TreeBuffer {
     let takeNext = () => {
       if (endOrder.length > 0) {
         nextStart = endOrder.pop()!
-        nextEnd = nextStart + ((this.buffer[nextStart + 3] + 1) << 2)
+        nextEnd = this.buffer[nextStart + 3]
       } else {
         nextEnd = -1
       }
@@ -356,10 +354,10 @@ export class TreeBuffer {
           }
         }
       }
-      let count = this.buffer[--index], end = this.buffer[--index] + offset,
+      let endIndex = this.buffer[--index], end = this.buffer[--index] + offset,
         start = this.buffer[--index] + offset, type = this.buffer[--index]
       if (start > from || end < to) continue
-      if ((count > 0 || iter.doEnter(type, start, end)) && iter.leave)
+      if ((endIndex != index + 4 || iter.doEnter(type, start, end)) && iter.leave)
         iter.leave(type, start, end)
     }
   }
@@ -375,7 +373,7 @@ export class TreeBuffer {
       }
       if (end1 > pos) return i
       if (!ignore) lastI = i
-      i += 4 + (buf[i + 3] << 2)
+      i = buf[i + 3]
     }
     return side < 0 ? lastI : -1
   }
@@ -427,7 +425,7 @@ class BufferSubtree extends Subtree {
   get start() { return this.buffer.buffer[this.index + 1] + this.bufferStart }
   get end() { return this.buffer.buffer[this.index + 2] + this.bufferStart }
 
-  private get endIndex() { return this.index + 4 + (this.buffer.buffer[this.index + 3] << 2) }
+  private get endIndex() { return this.buffer.buffer[this.index + 3] }
 
   childBefore(pos: number): Subtree | null {
     let index = this.buffer.findIndex(pos, -1, this.bufferStart, this.index + 4, this.endIndex)
@@ -577,7 +575,7 @@ function buildTree(cursor: BufferCursor, maxBufferLength: number, reused: Tree[]
         index = copyToBuffer(bufferStart, buffer, index)
     }
     if (type & TYPE_TAGGED) { // Don't copy repeat nodes into buffers
-      buffer[--index] = (startIndex - index) >> 2
+      buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
       buffer[--index] = type
