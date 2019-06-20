@@ -6,6 +6,9 @@ const GRAMMAR_ID_MASK = (2**14 - 1) << 16, TERM_ID_MASK = 2**16 - 1
 export function grammarID(type: number) { return type & GRAMMAR_ID_MASK }
 export function termID(type: number) { return type & TERM_ID_MASK }
 
+let nextGrammarID = 0
+export function allocateGrammarID() { return (nextGrammarID++) << 16 }
+
 export interface ChangedRange {
   fromA: number
   toA: number
@@ -261,8 +264,6 @@ Tree.prototype.parent = null
 export class TreeBuffer {
   // FIXME store a type in here to efficiently represent nodes whose children all fit in a buffer (esp repeat nodes)?
   constructor(readonly buffer: Uint16Array, readonly length: number, readonly grammarID: number) {}
-
-  get nodeCount() { return this.buffer.length >> 2 }
 
   toString(tags?: TagMap<any>) {
     let parts: string[] = []
@@ -551,7 +552,6 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
     // (used to group repeat content into a buffer)
     let fork = cursor.fork()
     let size = 0, start = 0, skip = 0, minStart = fork.end - maxBufferLength
-    // FIXME maxBufferLength is a _length_ not a size
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
       let localSkipped = isTagged(fork.type) ? 0 : 4
