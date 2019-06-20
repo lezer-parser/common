@@ -1,6 +1,10 @@
-export const DEFAULT_BUFFER_LENGTH = 1024
-export const TYPE_TAGGED = 1
-export const GRAMMAR_ID_MASK = (2**14 - 1) << 16, TERM_ID_MASK = 2**16 - 1
+export const DefaultBufferLength = 1024
+
+export function isTagged(type: number) { return (type & 1) > 0 }
+
+const GRAMMAR_ID_MASK = (2**14 - 1) << 16, TERM_ID_MASK = 2**16 - 1
+export function grammarID(type: number) { return type & GRAMMAR_ID_MASK }
+export function termID(type: number) { return type & TERM_ID_MASK }
 
 export interface ChangedRange {
   fromA: number
@@ -90,7 +94,7 @@ export class Tree extends Subtree {
   get start() { return 0 }
 
   toString(tags?: TagMap<any>): string {
-    let name = (this.type & TYPE_TAGGED) == 0 ? null : tags ? tags.get(this.type) : this.type
+    let name = !isTagged(this.type) ? null : tags ? tags.get(this.type) : this.type
     let children = this.children.map(c => c.toString(tags)).join()
     return !name ? children : name + (children.length ? "(" + children + ")" : "")
   }
@@ -161,7 +165,7 @@ export class Tree extends Subtree {
 
   // @internal
   iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
-    if ((this.type & TYPE_TAGGED) && !iter.doEnter(this.type, offset, offset + this.length))
+    if (isTagged(this.type) && !iter.doEnter(this.type, offset, offset + this.length))
       return
         
     if (from <= to) {
@@ -179,7 +183,7 @@ export class Tree extends Subtree {
         child.iterInner(from, to, start, iter)
       }
     }      
-    if (iter.leave && (this.type & TYPE_TAGGED)) iter.leave(this.type, offset, offset + this.length)
+    if (iter.leave && isTagged(this.type)) iter.leave(this.type, offset, offset + this.length)
     return
   }
 
@@ -210,7 +214,7 @@ export class Tree extends Subtree {
         let child = this.children[select], childStart = this.positions[select] + start
         if (child.length == 0 && childStart == pos) continue
         if (child instanceof Tree) {
-          if (child.type & TYPE_TAGGED) return new NodeSubtree(child, childStart, parent)
+          if (isTagged(child.type)) return new NodeSubtree(child, childStart, parent)
           return child.findChild(pos, side, childStart, parent)
         } else {
           let found = child.findIndex(pos, side, childStart, 0, child.buffer.length)
@@ -234,16 +238,16 @@ export class Tree extends Subtree {
     return new Tree(this.children.concat(other.children), this.positions.concat(other.positions), this.type)
   }
 
-  balance(maxBufferLength = DEFAULT_BUFFER_LENGTH) {
-    return this.children.length <= BALANCE_BRANCH_FACTOR ? this :
+  balance(maxBufferLength = DefaultBufferLength) {
+    return this.children.length <= BalanceBranchFactor ? this :
       balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0, maxBufferLength)
   }
 
-  static fromBuffer(buffer: readonly number[], grammarID: number, maxBufferLength = DEFAULT_BUFFER_LENGTH): Tree {
+  static fromBuffer(buffer: readonly number[], grammarID: number, maxBufferLength = DefaultBufferLength): Tree {
     return buildTree(new FlatBufferCursor(buffer, buffer.length), grammarID, maxBufferLength, [])
   }
 
-  static build(cursor: BufferCursor, grammarID: number, maxBufferLength: number = DEFAULT_BUFFER_LENGTH, reused: Tree[] = []) {
+  static build(cursor: BufferCursor, grammarID: number, maxBufferLength: number = DefaultBufferLength, reused: Tree[] = []) {
     return buildTree(cursor, grammarID, maxBufferLength, reused)
   }
 }
@@ -462,8 +466,6 @@ class BufferSubtree extends Subtree {
   }
 }
 
-export const REUSED_VALUE = -1
-
 export interface BufferCursor {
   pos: number
   type: number
@@ -489,17 +491,17 @@ class FlatBufferCursor implements BufferCursor {
   fork() { return new FlatBufferCursor(this.buffer, this.index) }
 }
 
-const BALANCE_BRANCH_FACTOR = 8
+const BalanceBranchFactor = 8
 
 function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: number, reused: Tree[]): Tree {
   function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
     let {type, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
     let node, startPos = start - parentStart
-    if (size == REUSED_VALUE) {
+    if (size < 0) {
       cursor.next()
       node = reused[type]
     } else if (end - start <= maxBufferLength &&
-               (buffer = findBufferSize(cursor.pos - minPos, type & TYPE_TAGGED ? -1 : type))) {
+               (buffer = findBufferSize(cursor.pos - minPos, isTagged(type) ? -1 : type))) {
       // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
@@ -507,7 +509,7 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
         index = copyToBuffer(buffer.start, data, index)
       node = new TreeBuffer(data, end - buffer.start, grammarID)
       // Wrap if this is a repeat node
-      if ((type & TYPE_TAGGED) == 0) node = new Tree([node], [0], type | grammarID, end - buffer.start)
+      if (!isTagged(type)) node = new Tree([node], [0], type | grammarID, end - buffer.start)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -522,7 +524,7 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
     children.push(node)
     positions.push(startPos)
     // End of a (possible) sequence of repeating nodes—might need to balance
-    if ((type & TYPE_TAGGED) == 0 && (cursor.pos == 0 || cursor.type != type))
+    if (!isTagged(type) && (cursor.pos == 0 || cursor.type != type))
       maybeBalanceSiblings(children, positions, type | grammarID)
   }
 
@@ -532,7 +534,7 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
       let prev = children[from - 1]
       if (!(prev instanceof Tree) || prev.type != type) break
     }
-    if (to - from < BALANCE_BRANCH_FACTOR) return
+    if (to - from < BalanceBranchFactor) return
     let start = positions[to - 1]
     let wrapped = balanceRange(type, children.slice(from, to).reverse(), positions.slice(from, to).reverse(),
                                0, to - from, start, maxBufferLength)
@@ -552,13 +554,13 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
     // FIXME maxBufferLength is a _length_ not a size
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
-      let localSkipped = fork.type & TYPE_TAGGED ? 0 : 4
-      if (nodeSize == REUSED_VALUE || startPos < minPos || fork.start < minStart || type > -1 && fork.type != type) break
+      let localSkipped = isTagged(fork.type) ? 0 : 4
+      if (nodeSize < 0 || startPos < minPos || fork.start < minStart || type > -1 && fork.type != type) break
       let nodeStart = fork.start
       fork.next()
       while (fork.pos > startPos) {
-        if (fork.size == REUSED_VALUE) break scan
-        if ((fork.type & TYPE_TAGGED) == 0) localSkipped += 4
+        if (fork.size < 0) break scan
+        if (!isTagged(fork.type)) localSkipped += 4
         fork.next()
       }
       start = nodeStart
@@ -577,7 +579,7 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
       while (cursor.pos > endPos)
         index = copyToBuffer(bufferStart, buffer, index)
     }
-    if (type & TYPE_TAGGED) { // Don't copy repeat nodes into buffers
+    if (isTagged(type)) { // Don't copy repeat nodes into buffers
       buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
@@ -607,7 +609,7 @@ function balanceRange(type: number,
       localPositions.push(positions[i] - start)
     }
   } else {
-    let maxChild = Math.max(maxBufferLength, Math.ceil(length * 1.5 / BALANCE_BRANCH_FACTOR))
+    let maxChild = Math.max(maxBufferLength, Math.ceil(length * 1.5 / BalanceBranchFactor))
     for (let i = from; i < to;) {
       let groupFrom = i, groupStart = positions[i]
       i++
@@ -645,9 +647,9 @@ export class TagMap<T> {
   constructor(readonly grammars: {readonly [id: number]: readonly (T | null)[]}) {}
 
   get(type: number): T | null {
-    if ((type & TYPE_TAGGED) == 0) return null
-    let table = this.grammars[(type & GRAMMAR_ID_MASK) >> 16]
-    return table && table[(type & TERM_ID_MASK) >> 1]
+    if (!isTagged(type)) return null
+    let table = this.grammars[grammarID(type) >> 16]
+    return table && table[termID(type) >> 1]
   }
 
   static single<T>(grammarID: number, values: readonly (T | null)[]) {
