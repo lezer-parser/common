@@ -151,10 +151,10 @@ export class Tree extends Subtree {
     /// The positions (offsets relative to the start of this tree) of
     /// the children.
     readonly positions: number[],
-    /// This tree's node type. The root node has type 0.
-    readonly type = 0,
     /// The total length of this tree.
-    readonly length: number = positions.length ? positions[positions.length - 1] + children[positions.length - 1].length : 0
+    readonly length: number,
+    /// This tree's node type. The root node has type 0.
+    readonly type = 0
   ) {
     super()
   }
@@ -205,7 +205,8 @@ export class Tree extends Subtree {
       }
     }
 
-    for (let i = 0, pos = 0, off = 0;; i++) {
+    let off = 0
+    for (let i = 0, pos = 0;; i++) {
       let next = i == changes.length ? null : changes[i]
       let nextPos = next ? cutAt(this, next.fromA, -1) : this.length
       if (nextPos > pos) this.partial(pos, nextPos, off, children, positions)
@@ -213,7 +214,7 @@ export class Tree extends Subtree {
       pos = cutAt(this, next.toA, 1)
       off += (next.toB - next.fromB) - (next.toA - next.fromA)
     }
-    return new Tree(children, positions)
+    return new Tree(children, positions, this.length + off)
   }
 
   /// Take the part of the tree up to the given position.
@@ -227,11 +228,11 @@ export class Tree extends Subtree {
       children.push(to <= at ? child : child.cut(at - from))
       positions.push(from)
     }
-    return new Tree(children, positions, this.type)
+    return new Tree(children, positions, at, this.type)
   }
 
   /// The empty tree
-  static empty = new Tree([], [])
+  static empty = new Tree([], [], 0)
 
   iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc) {
     let iter = new Iteration(enter, leave)
@@ -311,10 +312,8 @@ export class Tree extends Subtree {
   /// Append another tree to this tree. `other` must have empty space
   /// big enough to fit this tree at its start.
   append(other: Tree) {
-    if (this.children.length == 0) return other
-    if (other.children.length == 0) return this
-    if (other.positions[0] < this.length) throw new Error("Can't append overlapping trees")
-    return new Tree(this.children.concat(other.children), this.positions.concat(other.positions), this.type)
+    if (other.children.length && other.positions[0] < this.length) throw new Error("Can't append overlapping trees")
+    return new Tree(this.children.concat(other.children), this.positions.concat(other.positions), other.length, this.type)
   }
 
   /// Balance the direct children of this tree. Should only be used on
@@ -600,7 +599,7 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
         index = copyToBuffer(buffer.start, data, index)
       node = new TreeBuffer(data, end - buffer.start, grammarID)
       // Wrap if this is a repeat node
-      if (!isTagged(type)) node = new Tree([node], [0], type | grammarID, end - buffer.start)
+      if (!isTagged(type)) node = new Tree([node], [0], end - buffer.start, type | grammarID)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -609,7 +608,7 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
       while (cursor.pos > endPos)
         takeNode(start, endPos, localChildren, localPositions)
       localChildren.reverse(); localPositions.reverse()
-      node = new Tree(localChildren, localPositions, type | grammarID, end - start)
+      node = new Tree(localChildren, localPositions, end - start, type | grammarID)
     }
 
     children.push(node)
@@ -680,7 +679,7 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
-  return new Tree(children.reverse(), positions.reverse())
+  return new Tree(children.reverse(), positions.reverse(), children.length ? positions[0] + children[0].length : 0)
 }
 
 function balanceRange(type: number,
@@ -720,7 +719,7 @@ function balanceRange(type: number,
           }
         } else {
           // Wrap with our type to make reuse possible
-          only = new Tree([only], [0], type, only.length)
+          only = new Tree([only], [0], only.length, type)
         }
         localChildren.push(only)
       } else {
@@ -729,7 +728,7 @@ function balanceRange(type: number,
       localPositions.push(groupStart - start)
     }
   }
-  return new Tree(localChildren, localPositions, type, length)
+  return new Tree(localChildren, localPositions, length, type)
 }
 
 /// A tag map is a data structure that holds metadata per tagged node
