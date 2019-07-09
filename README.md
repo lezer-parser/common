@@ -1,10 +1,13 @@
 # lezer-tree
 
-[Lezer](https://github.com/lezer-parser/lezer) is an incremental GLR
-parser intended for use in an editor or similar system.
+[ [**WEBSITE**](http://lezer.codemirror.net) | [**ISSUES**](https://github.com/lezer-parser/lezer/issues) | [**FORUM**](https://discuss.codemirror.net/c/lezer) | [**CHANGELOG**](https://github.com/lezer-parser/lezer-tree/blob/master/CHANGELOG.md) ]
+
+[Lezer](https://lezer.codemirror.net/) is an incremental GLR parser
+intended for use in an editor or similar system.
 
 Lezer-tree provides the syntax tree data structure that lezer outputs.
 
-The code is licensed under an MIT license.
+Its programming interface is documented on [the
+website](https://lezer.codemirror.net/docs/ref/#tree).
 
-Proper docs will follow when the system stabilizes.
+This code is licensed under an MIT license.
