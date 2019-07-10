@@ -244,7 +244,7 @@ export class Tree extends Subtree {
   iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
     if (isTagged(this.type) && !iter.doEnter(this.type, offset, offset + this.length))
       return
-        
+
     if (from <= to) {
       for (let i = 0; i < this.children.length && !iter.done; i++) {
         let child = this.children[i], start = this.positions[i] + offset, end = start + child.length
@@ -679,7 +679,8 @@ function buildTree(cursor: BufferCursor, grammarID: number, maxBufferLength: num
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
-  return new Tree(children.reverse(), positions.reverse(), children.length ? positions[0] + children[0].length : 0)
+  let length = children.length ? positions[0] + children[0].length : 0
+  return new Tree(children.reverse(), positions.reverse(), length)
 }
 
 function balanceRange(type: number,
