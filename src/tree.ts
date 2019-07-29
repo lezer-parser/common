@@ -766,3 +766,67 @@ export class TagMap<T> {
   /// The empty tag map.
   static empty = new TagMap<any>([])
 }
+
+function badTag(tag: string): never {
+  throw new SyntaxError("Invalid tag " + JSON.stringify(tag))
+}
+
+export class Tag {
+  private parts: readonly string[]
+
+  constructor(tag: string) {
+    let parts = []
+    if (tag.length) for (let pos = 0;;) {
+      let start = pos
+      while (pos < tag.length) {
+        let next = tag.charCodeAt(pos)
+        if (next == 61 || next == 46) break // "=" or "."
+        pos++
+      }
+      if (pos == start) badTag(tag)
+      let name = tag.slice(start, pos), value = ""
+      if (tag.charCodeAt(pos) == 61) {
+        let valStart = ++pos
+        if (tag.charCodeAt(pos) == 34 /* '"' */) {
+          for (pos++;;) {
+            if (pos >= tag.length) badTag(tag)
+            let next = tag.charCodeAt(pos++)
+            if (next == 92) pos++
+            else if (next == 34) break
+          }
+          value = JSON.parse(tag.slice(valStart, pos))
+        } else {
+          while (pos < tag.length && tag.charCodeAt(pos) != 46) pos++
+          value = tag.slice(valStart, pos)
+        }
+      }
+      parts.push(name, value)
+      if (pos == tag.length) break
+      if (tag.charCodeAt(pos) != 46) badTag(tag)
+      pos++
+    }
+    this.parts = parts
+  }
+
+  private find(name: string, value?: string) {
+    for (let i = 0; i < this.parts.length; i += 2) {
+      if (this.parts[i] == name && (value == null || this.parts[i + 1] == value)) return i
+    }
+    return -1
+  }
+
+  has(name: string, value?: string) {
+    return this.find(name, value) > -1
+  }
+
+  matches(tag: Tag) {
+    let score = 0
+    for (let i = 0; i < tag.parts.length; i += 2) {
+      let val = tag.parts[i + 1]
+      let found = this.find(tag.parts[i], val || undefined)
+      if (found < 0) return 0
+      score += 2 ** ((tag.parts.length - i) >> 1) + (val ? 1 : 0)
+    }
+    return score
+  }
+}
