@@ -1,8 +1,8 @@
 /// The default maximum length of a `TreeBuffer` node.
 export const DefaultBufferLength = 1024
 
-/// Checks whether the given node type is a tagged node.
-export function isTagged(type: number) { return (type & 1) > 0 }
+// Checks whether the given node type is a tagged node.
+function isTagged(type: number) { return (type & 1) > 0 }
 
 /// The `unchanged` method expects changed ranges in this format.
 export interface ChangedRange {
@@ -731,11 +731,25 @@ function badTag(tag: string): never {
   throw new SyntaxError("Invalid tag " + JSON.stringify(tag))
 }
 
-/// FIXME document
+/// Tags represent information about nodes. They are an ordered
+/// collection of parts (more specific ones first) written in the form
+/// `boolean.literal.expression` (where `boolean` further specifies
+/// `literal`, which in turn further specifies `expression`).
+///
+/// A part may also have a value, written after an `=` sign, as in
+/// `tag.selector.lang=css`. Part names and values may be double
+/// quoted (using JSON string notation) when they contain non-word
+/// characters.
+///
+/// This wrapper object pre-parses the tag for easy querying.
 export class Tag {
   private parts: readonly string[]
 
-  constructor(readonly tag: string) {
+  /// Create a tag object from a string.
+  constructor(
+    /// The string that the tag is based on.
+    readonly tag: string
+  ) {
     let parts = []
     if (tag.length) for (let pos = 0;;) {
       let start = pos
@@ -776,12 +790,21 @@ export class Tag {
     return -1
   }
 
+  /// Check whether this tag has a part by the given name. If `value`
+  /// is given, this will only return true when that part also has
+  /// that specific value.
   has(name: string, value?: string) {
     return this.find(name, value) > -1
   }
 
+  /// See whether this tag contains all the parts present in the
+  /// argument tag, and, if the part has a value in the query tag, the
+  /// same value in this tag. Returns a specificity score—0 means
+  /// there was no match, a higher score means the query matched more
+  /// specific parts of the tag.
   matches(tag: Tag) {
     let score = 0
+    if (tag.parts.length == 0) return 1
     for (let i = 0; i < tag.parts.length; i += 2) {
       let val = tag.parts[i + 1]
       let found = this.find(tag.parts[i], val || undefined)
@@ -791,5 +814,7 @@ export class Tag {
     return score
   }
 
+  /// The empty tag, returned for nodes that don't have a meaningful
+  /// tag.
   static empty = new Tag("")
 }

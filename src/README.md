@@ -10,17 +10,9 @@
 
 @LeaveFunc
 
-### Node types
+### Node tags
 
-@TagMap
-
-@isTagged
-
-@grammarID
-
-@termID
-
-@allocateGrammarID
+@Tag
 
 ### Buffers
 
