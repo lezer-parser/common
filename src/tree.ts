@@ -130,9 +130,10 @@ export abstract class Subtree {
 /// part of this data structure, and can be used (through `resolve`,
 /// for example) to zoom in on any single node.
 export class Tree extends Subtree {
+  /// @internal
   parent!: null
 
-  /// Construct a tree.
+  /// @internal
   constructor(
     /// The tree's child nodes. Children small enough to fit in a
     /// `TreeBuffer` will be represented as such, other children can be
@@ -143,25 +144,34 @@ export class Tree extends Subtree {
     readonly positions: number[],
     /// The total length of this tree.
     readonly length: number,
-    /// Mapping from node types to tags for this grammar
+    /// Mapping from node types to tags for this grammar @internal
     readonly tags: readonly Tag[],
-    /// This tree's node type. The root node has type 0.
+    /// This tree's node type. The root node has type 0. @internal
     readonly type: number = 0
   ) {
     super()
   }
 
+  /// @internal
   get start() { return 0 }
 
+  /// @internal
+  get end() { return this.length }
+
+  /// @internal
   get tag() { return isTagged(this.type) ? this.tags[this.type >> 1] : Tag.empty }
 
+  /// Check whether this tree's tag belongs to a given set of tags.
+  /// Can be used to determine that a node belongs to the grammar
+  /// defined by a specific parser.
+  isPartOf(tags: readonly Tag[]) { return this.tags == tags }
+
+  /// @internal
   toString(): string {
     let name = !isTagged(this.type) ? null : this.tag.tag
     let children = this.children.map(c => c.toString()).join()
     return !name ? children : name + (children.length ? "(" + children + ")" : "")
   }
-
-  get end() { return this.length }
 
   private partial(start: number, end: number, offset: number, children: (Tree | TreeBuffer)[], positions: number[]) {
     for (let i = 0; i < this.children.length; i++) {
@@ -228,6 +238,7 @@ export class Tree extends Subtree {
   /// The empty tree
   static empty = new Tree([], [], 0, [])
 
+  /// @internal
   iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc) {
     let iter = new Iteration(enter, leave)
     this.iterInner(from, to, 0, iter)
@@ -263,10 +274,12 @@ export class Tree extends Subtree {
     return this.resolveInner(pos, 0, this)
   }
 
+  /// @internal
   childBefore(pos: number): Subtree | null {
     return this.findChild(pos, -1, 0, this)
   }
 
+  /// @internal
   childAfter(pos: number): Subtree | null {
     return this.findChild(pos, 1, 0, this)
   }
