@@ -7,10 +7,13 @@
   "author": "Marijn Haverbeke <marijnh@gmail.com>",
   "license": "MIT",
   "devDependencies": {
+    "ist": "^1.1.1",
+    "mocha": "^6.2.0",
     "typescript": "^3.4.3"
   },
   "scripts": {
     "watch": "tsc --outDir dist -w -d",
-    "prepare": "tsc --outDir dist -d"
+    "prepare": "tsc --outDir dist -d",
+    "test": "mocha test/test-*.js"
   }
 }

@@ -797,6 +797,9 @@ export class Tag {
     this.parts = parts
   }
 
+  /// @internal
+  toString() { return this.tag }
+
   private find(name: string, value?: string) {
     for (let i = 0; i < this.parts.length; i += 2) {
       if (this.parts[i] == name && (value == null || this.parts[i + 1] == value)) return i
@@ -823,7 +826,7 @@ export class Tag {
       let val = tag.parts[i + 1]
       let found = this.find(tag.parts[i], val || undefined)
       if (found < 0) return 0
-      score += 2 ** ((tag.parts.length - i) >> 1) + (val ? 1 : 0)
+      score += 2 ** ((this.parts.length - found) >> 1) + (val ? 1 : 0)
     }
     return score
   }
@@ -834,21 +837,59 @@ export class Tag {
 }
 
 class MatchRule<T> {
-  constructor(readonly inner: Tag, readonly parents: readonly Tag[], readonly value: T) {}
+  constructor(readonly inner: Tag,
+              readonly parents: readonly Tag[],
+              readonly ops: readonly string[],
+              readonly value: T) {}
 }
 
 const none: readonly any[] = []
 
+/// A `TagMatch` holds a set of rules matching tags to values (of a
+/// type `T`). It somewhat resembles CSS in structure.
 export class TagMatch<T> {
   private buckets: {readonly [partName: string]: readonly MatchRule<T>[]}
 
+  /// Create a tag match. `spec` should be an object whose properties
+  /// are selectors and whose values are the values associated with
+  /// those selectors.
+  ///
+  /// Selectors can be:
+  ///
+  /// - A tag (matched via the [`match`](##tree.Tag.match) method)
+  ///
+  /// - Selectors separated by space (descendant selector, which
+  ///   matches the second selector if one of its parents is the
+  ///   first) or a `>` operator (child selector, which only matches
+  ///   if the direct parent matches the first selector).
+  ///
+  /// - Selectors separated by a comma, which makes this rule match
+  ///   any of those selectors.
+  ///
+  /// So for example `{"a.b": 1, "a.c": 2}` maps any tags that match
+  /// `a.b` to the value 1, and any that match `a.c` to 2.
+  ///
+  /// `{"a, b": "Yes", "x > y": "No"}` matches tags that have `a` or
+  /// `b` in them to `"Yes`" and tags that have `y` in them whose
+  /// direct parent has `x` to `"No"`.
   constructor(readonly spec: {readonly [selector: string]: T}) {
-    let rules = [], tag = /\s*([^\s"]|"(?:[^"\\]|\\.)+")*/g
+    let rules = [], token = /\s*([,>]|(?:"(?:[^"\\]|\\.)+"|[^"\s>,])+)\s*/g, m
     for (let selector in spec) {
-      let tags = [], m
-      while (m = tag.exec(selector)) tags.push(new Tag(m[1]))
-      if (!tags.length) throw new Error("Invalid selector " + JSON.stringify(selector))
-      rules.push(new MatchRule(tags[tags.length - 1], tags.length > 1 ? tags.slice(0, tags.length - 1) : none, spec[selector]))
+      let group: {tags: Tag[], ops: string[]} = {tags: [], ops: []}, groups = [group], childOp = null
+      while (m = token.exec(selector)) {
+        if (m[1] == "," && group.tags.length) {
+          groups.push(group = {tags: [], ops: []})
+        } else if (m[1] == ">") {
+          childOp = m[1]
+        } else {
+          if (group.tags.length) group.ops.push(childOp || " ")
+          group.tags.push(new Tag(m[1]))
+        }
+      }
+      for (let {tags, ops} of groups) {
+        let last = tags.length - 1
+        rules.push(new MatchRule(tags[last], last ? tags.slice(0, last) : none, last ? ops.slice(0, last) : none, spec[selector]))
+      }
     }
     let frequencies: {[name: string]: number} = Object.create(null)
     for (let rule of rules) {
@@ -869,7 +910,10 @@ export class TagMatch<T> {
     this.buckets = buckets
   }
 
-  match(tag: Tag, context: readonly Tag[] = none) {
+  /// Find the best (most specific) rule that matches `tag`
+  /// (optionally specifying a stack of parent tags in `context`) and
+  /// return its value, or `null` if no rule matches.
+  best(tag: Tag, context: readonly Tag[] = none) {
     let best = null, bestScore = 0, bestParents = 0
     for (let i = 0; i < tag.parts.length; i += 2) {
       let bucket = this.buckets[tag.parts[i]]
@@ -889,15 +933,36 @@ export class TagMatch<T> {
     return best
   }
 
+  /// Find _all_ rules that match `tag` (with parent nodes `context`),
+  /// and return their values, sorted by the specificity of the match
+  /// (more specific first).
+  all(tag: Tag, context: readonly Tag[] = none): T[] {
+    let found: T[] = [], scores: number[] = []
+    for (let i = 0; i < tag.parts.length; i += 2) {
+      let bucket = this.buckets[tag.parts[i]]
+      if (bucket) for (let rule of bucket) {
+        let score = tag.match(rule.inner)
+        let parents = score > 0 ? this.matchContext(rule, context) : 0
+        if (!parents) continue
+        score = score * 100 + parents
+        let i = 0
+        while (i < scores.length && scores[i] > score) i++
+        found.splice(i, 0, rule.value)
+        scores.splice(i, 0, score)
+      }
+    }
+    return found
+  }
+
   private matchContext(rule: MatchRule<T>, context: readonly Tag[]) {
     if (rule.parents.length == 0) return 1
     let pos = context.length, count = 1
     outer: for (let i = rule.parents.length - 1; i >= 0; i--) {
-      let parent = rule.parents[i]
-      for (let j = pos - 1; j >= 0; j--) {
+      let parent = rule.parents[i], op = rule.ops[i]
+      for (let j = pos - 1; j >= (op == ">" ? pos - 1 : 0); j--) {
         let score = context[j].match(parent)
         if (score > 0) {
-          pos = j - 1
+          pos = j
           count++
           continue outer
         }
