@@ -756,7 +756,8 @@ function badTag(tag: string): never {
 ///
 /// This wrapper object pre-parses the tag for easy querying.
 export class Tag {
-  private parts: readonly string[]
+  /// @internal
+  parts: readonly string[]
 
   /// Create a tag object from a string.
   constructor(
@@ -815,7 +816,7 @@ export class Tag {
   /// same value in this tag. Returns a specificity score—0 means
   /// there was no match, a higher score means the query matched more
   /// specific parts of the tag.
-  matches(tag: Tag) {
+  match(tag: Tag) {
     let score = 0
     if (tag.parts.length == 0) return 1
     for (let i = 0; i < tag.parts.length; i += 2) {
@@ -830,4 +831,79 @@ export class Tag {
   /// The empty tag, returned for nodes that don't have a meaningful
   /// tag.
   static empty = new Tag("")
+}
+
+class MatchRule<T> {
+  constructor(readonly inner: Tag, readonly parents: readonly Tag[], readonly value: T) {}
+}
+
+const none: readonly any[] = []
+
+export class TagMatch<T> {
+  private buckets: {readonly [partName: string]: readonly MatchRule<T>[]}
+
+  constructor(readonly spec: {readonly [selector: string]: T}) {
+    let rules = [], tag = /\s*([^\s"]|"(?:[^"\\]|\\.)+")*/g
+    for (let selector in spec) {
+      let tags = [], m
+      while (m = tag.exec(selector)) tags.push(new Tag(m[1]))
+      if (!tags.length) throw new Error("Invalid selector " + JSON.stringify(selector))
+      rules.push(new MatchRule(tags[tags.length - 1], tags.length > 1 ? tags.slice(0, tags.length - 1) : none, spec[selector]))
+    }
+    let frequencies: {[name: string]: number} = Object.create(null)
+    for (let rule of rules) {
+      for (let i = 0; i < rule.inner.parts.length; i += 2) {
+        let part = rule.inner.parts[i]
+        frequencies[part] = (frequencies[part] || 0) + 1
+      }
+    }
+    let buckets: {[partName: string]: MatchRule<T>[]} = Object.create(null)
+    for (let rule of rules) {
+      let rarePart = null, rarity = 1e9
+      for (let i = 0; i < rule.inner.parts.length; i += 2) {
+        let part = rule.inner.parts[i], freq = frequencies[part]
+        if (freq < rarity) { rarePart = part; rarity = freq }
+      }
+      ;(buckets[rarePart!] || (buckets[rarePart!] = [])).push(rule)
+    }
+    this.buckets = buckets
+  }
+
+  match(tag: Tag, context: readonly Tag[] = none) {
+    let best = null, bestScore = 0, bestParents = 0
+    for (let i = 0; i < tag.parts.length; i += 2) {
+      let bucket = this.buckets[tag.parts[i]]
+      if (bucket) for (let rule of bucket) {
+        let score = tag.match(rule.inner)
+        if (score > 0 && score >= bestScore) {
+          let parents = this.matchContext(rule, context)
+          if (!parents) continue
+          if (score > bestScore || parents > bestParents) {
+            best = rule.value
+            bestScore = score
+            bestParents = parents
+          }
+        }
+      }
+    }
+    return best
+  }
+
+  private matchContext(rule: MatchRule<T>, context: readonly Tag[]) {
+    if (rule.parents.length == 0) return 1
+    let pos = context.length, count = 1
+    outer: for (let i = rule.parents.length - 1; i >= 0; i--) {
+      let parent = rule.parents[i]
+      for (let j = pos - 1; j >= 0; j--) {
+        let score = context[j].match(parent)
+        if (score > 0) {
+          pos = j - 1
+          count++
+          continue outer
+        }
+      }
+      return 0
+    }
+    return count
+  }
 }
