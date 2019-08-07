@@ -80,4 +80,15 @@ describe("TagMatch", () => {
     ist(m.best(new Tag("b"), [new Tag("a")]), 1)
     ist(m.best(new Tag("b"), [new Tag("a"), new Tag("c")]), null)
   })
+
+  it("supports nested match specs", () => {
+    let m = new TagMatch({
+      ".a": {
+        "b": 1,
+        "c": 2
+      }
+    })
+    ist(m.best(new Tag("b.a")), 1)
+    ist(m.best(new Tag("c.a")), 2)
+  })
 })

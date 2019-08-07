@@ -810,13 +810,6 @@ export class Tag {
   /// @internal
   toString() { return this.tag }
 
-  private find(name: string, value?: string) {
-    for (let i = 0; i < this.parts.length; i += 2) {
-      if (this.parts[i] == name && (value == null || this.parts[i + 1] == value)) return i
-    }
-    return -1
-  }
-
   /// See whether `tag`'s parts are a suffix of (or equal to) this
   /// tag's parts, and whether all the properties in `tag` also occur,
   /// with the same value, in this this tag.
@@ -854,6 +847,8 @@ class MatchRule<T> {
 
 const none: readonly any[] = []
 
+export type TagMatchSpec<T> = {readonly [selector: string]: T | TagMatchSpec<T>}
+
 /// A `TagMatch` holds a set of rules matching tags to values (of a
 /// type `T`). It somewhat resembles CSS in structure.
 export class TagMatch<T> {
@@ -888,37 +883,45 @@ export class TagMatch<T> {
   /// `{"a, b": "Yes", "x > y": "No"}` matches tags that have `a` or
   /// `b` in them to `"Yes`" and tags that have `y` in them whose
   /// direct parent has `x` to `"No"`.
-  constructor(readonly spec: {readonly [selector: string]: T}) {
-    let rules = [], token = /([,>!]|(?:"(?:[^"\\]|\\.)+"|[^!"\s>,])+)\s*/g, m
-    for (let selector in spec) {
-      let groups: string[][] = [[]]
-      while (m = token.exec(selector)) {
-        if (m[1] == ",") groups.push([])
-        else groups[groups.length - 1].push(m[1])
-      }
-      let getTag = (str: string) => {
-        if (!str || /^[>!]$/.test(str)) throw new SyntaxError("Invalid selector: " + selector)
-        return new Tag(str)
-      }
-      for (let group of groups) if (group.length) {
-        let inner = getTag(group[group.length - 1]), context = []
-        for (let i = group.length - 2; i >= 0;) {
-          let next = group[i--]
-          if (next == ">") {
-            context.push(new ContextSelector(getTag(group[i--]), ContextType.Child))
-          } else {
-            let tag = getTag(next)
-            if (group[i] == "!") {
-              i--
-              context.push(new ContextSelector(getTag(group[i--]), ContextType.FirstMatching, tag))
+  constructor(readonly spec: TagMatchSpec<T>) {
+    let rules: MatchRule<T>[] = [], token = /([,>!]|(?:"(?:[^"\\]|\\.)+"|[^!"\s>,])+)\s*/g
+    function parseSpec(spec: TagMatchSpec<T>, suffix: string | null) {
+      for (let prop in spec) {
+        let selector = suffix ? prop + suffix : prop
+        if (/^\./.test(selector)) {
+          parseSpec(spec[prop] as TagMatchSpec<T>, selector)
+          continue
+        }
+        let groups: string[][] = [[]], m
+        while (m = token.exec(selector)) {
+          if (m[1] == ",") groups.push([])
+          else groups[groups.length - 1].push(m[1])
+        }
+        let getTag = (str: string) => {
+          if (!str || /^[>!]$/.test(str)) throw new SyntaxError("Invalid selector: " + selector)
+          return new Tag(str)
+        }
+        for (let group of groups) if (group.length) {
+          let inner = getTag(group[group.length - 1]), context = []
+          for (let i = group.length - 2; i >= 0;) {
+            let next = group[i--]
+            if (next == ">") {
+              context.push(new ContextSelector(getTag(group[i--]), ContextType.Child))
             } else {
-              context.push(new ContextSelector(tag, ContextType.Descendant))
+              let tag = getTag(next)
+              if (group[i] == "!") {
+                i--
+                context.push(new ContextSelector(getTag(group[i--]), ContextType.FirstMatching, tag))
+              } else {
+                context.push(new ContextSelector(tag, ContextType.Descendant))
+              }
             }
           }
+          rules.push(new MatchRule(inner, context.length ? context : none, spec[prop] as T))
         }
-        rules.push(new MatchRule(inner, context.length ? context : none, spec[selector]))
       }
     }
+    parseSpec(spec, null)
 
     let frequencies: {[name: string]: number} = Object.create(null)
     for (let rule of rules)
