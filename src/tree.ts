@@ -54,7 +54,7 @@ export abstract class Subtree {
   /// The subtree's parent. Will be `null` for the root node
   abstract parent: Subtree | null
 
-  /// The node's tag. Will be `Tag.empty` for the root
+  /// The node's tag.
   abstract tag: Tag
   /// The start source offset of this subtree
   abstract start: number
@@ -159,7 +159,10 @@ export class Tree extends Subtree {
   get end() { return this.length }
 
   /// @internal
-  get tag() { return isTagged(this.type) ? this.tags[this.type >> 1] : Tag.empty }
+  get tag() {
+    if (!isTagged(this.type)) throw new RangeError("Requesting tag for an untagged tree")
+    return this.tags[this.type >> 1]
+  }
 
   /// Check whether this tree's tag belongs to a given set of tags.
   /// Can be used to determine that a node belongs to the grammar
@@ -756,16 +759,20 @@ function badTag(tag: string): never {
 ///
 /// This wrapper object pre-parses the tag for easy querying.
 export class Tag {
-  /// @internal
+  /// The parts of the tag (more general first, so in inverted order
+  /// from tag notation).
   parts: readonly string[]
+  // The tag's properties, as pairs of `name`, `value` strings (the
+  // even indices hold names, the odd values).
+  properties: readonly string[]
 
   /// Create a tag object from a string.
   constructor(
     /// The string that the tag is based on.
     readonly tag: string
   ) {
-    let parts = []
-    if (tag.length) for (let pos = 0;;) {
+    let parts = [], properties = []
+    for (let pos = 0;;) {
       let start = pos
       while (pos < tag.length) {
         let next = tag.charCodeAt(pos)
@@ -773,9 +780,9 @@ export class Tag {
         pos++
       }
       if (pos == start) badTag(tag)
-      let name = tag.slice(start, pos), value = ""
-      if (tag.charCodeAt(pos) == 61) {
-        let valStart = ++pos
+      let name = tag.slice(start, pos)
+      if (tag.charCodeAt(pos) == 61 /* '=' */) {
+        let valStart = ++pos, value
         if (tag.charCodeAt(pos) == 34 /* '"' */) {
           for (pos++;;) {
             if (pos >= tag.length) badTag(tag)
@@ -785,16 +792,19 @@ export class Tag {
           }
           value = JSON.parse(tag.slice(valStart, pos))
         } else {
-          while (pos < tag.length && tag.charCodeAt(pos) != 46) pos++
+          while (pos < tag.length && tag.charCodeAt(pos) != 46 /* '.' */) pos++
           value = tag.slice(valStart, pos)
         }
+        properties.push(name, value)
+      } else {
+        parts.push(name)
       }
-      parts.push(name, value)
       if (pos == tag.length) break
-      if (tag.charCodeAt(pos) != 46) badTag(tag)
+      if (tag.charCodeAt(pos) != 46 /* '.' */) badTag(tag)
       pos++
     }
-    this.parts = parts
+    this.parts = parts.reverse()
+    this.properties = properties.length ? properties : none
   }
 
   /// @internal
@@ -807,33 +817,28 @@ export class Tag {
     return -1
   }
 
-  /// Check whether this tag has a part by the given name. If `value`
-  /// is given, this will only return true when that part also has
-  /// that specific value.
-  has(name: string, value?: string) {
-    return this.find(name, value) > -1
-  }
-
-  /// See whether this tag contains all the parts present in the
-  /// argument tag, and, if the part has a value in the query tag, the
-  /// same value in this tag. Returns a specificity score—0 means
-  /// there was no match, a higher score means the query matched more
-  /// specific parts of the tag.
+  /// See whether `tag`'s parts are a suffix of (or equal to) this
+  /// tag's parts, and whether all the properties in `tag` also occur,
+  /// with the same value, in this this tag.
   match(tag: Tag) {
-    let score = 0
-    if (tag.parts.length == 0) return 1
-    for (let i = 0; i < tag.parts.length; i += 2) {
-      let val = tag.parts[i + 1]
-      let found = this.find(tag.parts[i], val || undefined)
-      if (found < 0) return 0
-      score += 2 ** ((this.parts.length - found) >> 1) + (val ? 1 : 0)
+    if (tag.parts.length == 0) return true
+    if (tag.parts.length > this.parts.length || tag.properties.length > this.properties.length)
+      return false
+    for (let i = 0; i < tag.parts.length; i++)
+      if (tag.parts[i] != this.parts[i]) return false
+    for (let i = 0; i < tag.properties.length; i += 2) {
+      let name = tag.properties[i], matched = false
+      for (let j = 0; j < this.properties.length && !matched; j += 2)
+        matched = this.properties[j] == name && this.properties[j + 1] == tag.properties[i + 1]
+      if (!matched) return false
     }
-    return score
+    return true
   }
 
-  /// The empty tag, returned for nodes that don't have a meaningful
-  /// tag.
-  static empty = new Tag("")
+  /// The number of parts and properties present in this tag.
+  get specificity() {
+    return this.parts.length + (this.properties.length >> 1)
+  }
 }
 
 class MatchRule<T> {
@@ -892,20 +897,15 @@ export class TagMatch<T> {
       }
     }
     let frequencies: {[name: string]: number} = Object.create(null)
+    for (let rule of rules)
+      forEachName(rule.inner, name => frequencies[name] = (frequencies[name] || 0) + 1)
+    let buckets: {[name: string]: MatchRule<T>[]} = Object.create(null)
     for (let rule of rules) {
-      for (let i = 0; i < rule.inner.parts.length; i += 2) {
-        let part = rule.inner.parts[i]
-        frequencies[part] = (frequencies[part] || 0) + 1
-      }
-    }
-    let buckets: {[partName: string]: MatchRule<T>[]} = Object.create(null)
-    for (let rule of rules) {
-      let rarePart = null, rarity = 1e9
-      for (let i = 0; i < rule.inner.parts.length; i += 2) {
-        let part = rule.inner.parts[i], freq = frequencies[part]
-        if (freq < rarity) { rarePart = part; rarity = freq }
-      }
-      ;(buckets[rarePart!] || (buckets[rarePart!] = [])).push(rule)
+      let rare = "", rarity = 1e9
+      forEachName(rule.inner, name => {
+        if (frequencies[name] < rarity) { rare = name; rarity = frequencies[name] }
+      })
+      ;(buckets[rare] || (buckets[rare] = [])).push(rule)
     }
     this.buckets = buckets
   }
@@ -914,22 +914,22 @@ export class TagMatch<T> {
   /// (optionally specifying a stack of parent tags in `context`) and
   /// return its value, or `null` if no rule matches.
   best(tag: Tag, context: readonly Tag[] = none) {
-    let best = null, bestScore = 0, bestParents = 0
-    for (let i = 0; i < tag.parts.length; i += 2) {
-      let bucket = this.buckets[tag.parts[i]]
-      if (bucket) for (let rule of bucket) {
-        let score = tag.match(rule.inner)
-        if (score > 0 && score >= bestScore) {
+    let best = null, bestSpec = 0, bestParents = 0
+    forEachName(tag, name => {
+      let bucket = this.buckets[name]
+      if (bucket) for (let rule of bucket) if (tag.match(rule.inner)) {
+        let spec = rule.inner.specificity
+        if (spec >= bestSpec) {
           let parents = this.matchContext(rule, context)
           if (!parents) continue
-          if (score > bestScore || parents > bestParents) {
+          if (spec > bestSpec || parents > bestParents) {
             best = rule.value
-            bestScore = score
+            bestSpec = spec
             bestParents = parents
           }
         }
       }
-    }
+    })
     return best
   }
 
@@ -938,37 +938,38 @@ export class TagMatch<T> {
   /// (more specific first).
   all(tag: Tag, context: readonly Tag[] = none): T[] {
     let found: T[] = [], scores: number[] = []
-    for (let i = 0; i < tag.parts.length; i += 2) {
-      let bucket = this.buckets[tag.parts[i]]
-      if (bucket) for (let rule of bucket) {
-        let score = tag.match(rule.inner)
-        let parents = score > 0 ? this.matchContext(rule, context) : 0
+    forEachName(tag, name => {
+      let bucket = this.buckets[name]
+      if (bucket) for (let rule of bucket) if (tag.match(rule.inner)) {
+        let parents = this.matchContext(rule, context)
         if (!parents) continue
-        score = score * 100 + parents
+        let score = rule.inner.specificity * 10000 + parents
         let i = 0
         while (i < scores.length && scores[i] > score) i++
         found.splice(i, 0, rule.value)
         scores.splice(i, 0, score)
       }
-    }
+    })
     return found
   }
 
   private matchContext(rule: MatchRule<T>, context: readonly Tag[]) {
     if (rule.parents.length == 0) return 1
-    let pos = context.length, count = 1
+    let pos = context.length, score = 1
     outer: for (let i = rule.parents.length - 1; i >= 0; i--) {
       let parent = rule.parents[i], op = rule.ops[i]
-      for (let j = pos - 1; j >= (op == ">" ? pos - 1 : 0); j--) {
-        let score = context[j].match(parent)
-        if (score > 0) {
-          pos = j
-          count++
-          continue outer
-        }
+      for (let j = pos - 1; j >= (op == ">" ? pos - 1 : 0); j--) if (context[j].match(parent)) {
+        score += 100 + parent.specificity
+        pos = j
+        continue outer
       }
       return 0
     }
-    return count
+    return score
   }
+}
+
+function forEachName(tag: Tag, f: (name: string) => void) {
+  tag.parts.forEach(f)
+  for (let i = 0; i < tag.properties.length; i += 2) f(tag.properties[i])
 }
