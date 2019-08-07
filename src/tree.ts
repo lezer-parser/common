@@ -818,19 +818,23 @@ export class Tag {
       return false
     for (let i = 0; i < tag.parts.length; i++)
       if (tag.parts[i] != this.parts[i]) return false
-    for (let i = 0; i < tag.properties.length; i += 2) {
-      let name = tag.properties[i], matched = false
-      for (let j = 0; j < this.properties.length && !matched; j += 2)
-        matched = this.properties[j] == name && this.properties[j + 1] == tag.properties[i + 1]
-      if (!matched) return false
-    }
-    return true
+    return matchProperties(this.properties, tag.properties)
   }
 
   /// The number of parts and properties present in this tag.
   get specificity() {
     return this.parts.length + (this.properties.length >> 1)
   }
+}
+
+function matchProperties(props: readonly string[], against: readonly string[]) {
+  for (let i = 0; i < against.length; i += 2) {
+    let name = against[i], matched = false
+    for (let j = 0; j < props.length && !matched; j += 2)
+      matched = props[j] == name && props[j + 1] == against[i + 1]
+    if (!matched) return false
+  }
+  return true
 }
 
 const enum ContextType { Descendant, Child, FirstMatching }
@@ -845,14 +849,46 @@ class MatchRule<T> {
               readonly value: T) {}
 }
 
-const none: readonly any[] = []
+const none: readonly any[] = [], noChildren: {[part: string]: any} = Object.create(null)
+
+class MatchTree<T> {
+  constructor(readonly rules: readonly MatchRule<T>[],
+              readonly children: {[part: string]: MatchTree<T>}) {}
+
+  match(tag: Tag, context: readonly Tag[], depth: number, f: (value: T, score: number) => void) {
+    for (let rule of this.rules) {
+      let score = matchProperties(tag.properties, rule.inner.properties) ? matchContext(rule, context) : 0
+      if (score > 0) f(rule.value, rule.inner.specificity * 10000 + score)
+    }
+    if (depth < tag.parts.length) {
+      let next = this.children[tag.parts[depth]]
+      if (next) next.match(tag, context, depth + 1, f)
+    }
+  }
+
+  static build<T>(rules: MatchRule<T>[], depth: number): MatchTree<T> {
+    let local = []
+    let children: {[part: string]: MatchTree<T>} = Object.create(null)
+    for (let rule of rules) {
+      if (rule.inner.parts.length == depth) {
+        local.push(rule)
+      } else {
+        let next = rule.inner.parts[depth]
+        if (children[next]) continue
+        children[next] = MatchTree.build(rules.filter(r => r.inner.parts[depth] == next), depth + 1)
+      }
+    }
+    return new MatchTree(local.length ? local : none,
+                         local.length == rules.length ? noChildren : children)
+  }
+}
 
 export type TagMatchSpec<T> = {readonly [selector: string]: T | TagMatchSpec<T>}
 
 /// A `TagMatch` holds a set of rules matching tags to values (of a
 /// type `T`). It somewhat resembles CSS in structure.
 export class TagMatch<T> {
-  private buckets: {readonly [partName: string]: readonly MatchRule<T>[]}
+  private tree: MatchTree<T>
 
   /// Create a tag match. `spec` should be an object whose properties
   /// are selectors and whose values are the values associated with
@@ -923,39 +959,16 @@ export class TagMatch<T> {
     }
     parseSpec(spec, null)
 
-    let frequencies: {[name: string]: number} = Object.create(null)
-    for (let rule of rules)
-      forEachName(rule.inner, name => frequencies[name] = (frequencies[name] || 0) + 1)
-    let buckets: {[name: string]: MatchRule<T>[]} = Object.create(null)
-    for (let rule of rules) {
-      let rare = "", rarity = 1e9
-      forEachName(rule.inner, name => {
-        if (frequencies[name] < rarity) { rare = name; rarity = frequencies[name] }
-      })
-      ;(buckets[rare] || (buckets[rare] = [])).push(rule)
-    }
-    this.buckets = buckets
+    this.tree = MatchTree.build(rules, 0)
   }
 
   /// Find the best (most specific) rule that matches `tag`
   /// (optionally specifying a stack of parent tags in `context`) and
   /// return its value, or `null` if no rule matches.
   best(tag: Tag, context: readonly Tag[] = none) {
-    let best = null, bestSpec = 0, bestParents = 0
-    forEachName(tag, name => {
-      let bucket = this.buckets[name]
-      if (bucket) for (let rule of bucket) if (tag.match(rule.inner)) {
-        let spec = rule.inner.specificity
-        if (spec >= bestSpec) {
-          let parents = this.matchContext(rule, context)
-          if (!parents) continue
-          if (spec > bestSpec || parents > bestParents) {
-            best = rule.value
-            bestSpec = spec
-            bestParents = parents
-          }
-        }
-      }
+    let best = null, bestScore = 0
+    this.tree.match(tag, context, 0, (value, score) => {
+      if (score > bestScore) { best = value; bestScore = score }
     })
     return best
   }
@@ -965,42 +978,31 @@ export class TagMatch<T> {
   /// (more specific first).
   all(tag: Tag, context: readonly Tag[] = none): T[] {
     let found: T[] = [], scores: number[] = []
-    forEachName(tag, name => {
-      let bucket = this.buckets[name]
-      if (bucket) for (let rule of bucket) if (tag.match(rule.inner)) {
-        let parents = this.matchContext(rule, context)
-        if (!parents) continue
-        let score = rule.inner.specificity * 10000 + parents
-        let i = 0
-        while (i < scores.length && scores[i] > score) i++
-        found.splice(i, 0, rule.value)
-        scores.splice(i, 0, score)
-      }
+    this.tree.match(tag, context, 0, (value, score) => {
+      let i = 0
+      while (i < scores.length && scores[i] > score) i++
+      found.splice(i, 0, value)
+      scores.splice(i, 0, score)
     })
     return found
   }
-
-  private matchContext(rule: MatchRule<T>, context: readonly Tag[]) {
-    if (rule.context.length == 0) return 1
-    let pos = context.length, score = 1
-    outer: for (let cx of rule.context) {
-      for (let j = pos - 1; j >= (cx.type == ContextType.Child ? pos - 1 : 0); j--) if (context[j].match(cx.tag)) {
-        if (cx.type == ContextType.FirstMatching) {
-          if (!context[j].match(cx.second!)) return null
-          score += 100 + cx.second!.specificity
-        } else {
-          score += 100 + cx.tag.specificity
-        }
-        pos = j
-        continue outer
-      }
-      return 0
-    }
-    return score
-  }
 }
 
-function forEachName(tag: Tag, f: (name: string) => void) {
-  tag.parts.forEach(f)
-  for (let i = 0; i < tag.properties.length; i += 2) f(tag.properties[i])
+function matchContext<T>(rule: MatchRule<T>, context: readonly Tag[]) {
+  if (rule.context.length == 0) return 1
+  let pos = context.length, score = 1
+  outer: for (let cx of rule.context) {
+    for (let j = pos - 1; j >= (cx.type == ContextType.Child ? pos - 1 : 0); j--) if (context[j].match(cx.tag)) {
+      if (cx.type == ContextType.FirstMatching) {
+        if (!context[j].match(cx.second!)) return 0
+        score += 100 + cx.second!.specificity
+      } else {
+        score += 100 + cx.tag.specificity
+      }
+      pos = j
+      continue outer
+    }
+    return 0
+  }
+  return score
 }
