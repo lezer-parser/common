@@ -146,8 +146,8 @@ export class Tree extends Subtree {
     readonly length: number,
     /// Mapping from node types to tags for this grammar @internal
     readonly tags: readonly Tag[],
-    /// This tree's node type. The root node has type 0. @internal
-    readonly type: number = 0
+    /// This tree's node type @internal
+    readonly type: number
   ) {
     super()
   }
@@ -218,7 +218,7 @@ export class Tree extends Subtree {
       pos = cutAt(this, next.toA, 1)
       off += (next.toB - next.fromB) - (next.toA - next.fromA)
     }
-    return new Tree(children, positions, this.length + off, this.tags)
+    return new Tree(children, positions, this.length + off, this.tags, 0)
   }
 
   /// Take the part of the tree up to the given position.
@@ -236,7 +236,7 @@ export class Tree extends Subtree {
   }
 
   /// The empty tree
-  static empty = new Tree([], [], 0, [])
+  static empty = new Tree([], [], 0, [], 0)
 
   /// @internal
   iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc) {
@@ -333,11 +333,11 @@ export class Tree extends Subtree {
   /// Build a tree from a postfix-ordered buffer of node information,
   /// or a cursor over such a buffer.
   static build(buffer: BufferCursor | readonly number[],
-               tags: readonly Tag[],
+               tags: readonly Tag[], topType: number,
                maxBufferLength: number = DefaultBufferLength,
                reused: Tree[] = []) {
     return buildTree(Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor,
-                     tags, maxBufferLength, reused)
+                     tags, topType, maxBufferLength, reused)
   }
 }
 
@@ -590,7 +590,7 @@ class FlatBufferCursor implements BufferCursor {
 
 const BalanceBranchFactor = 8
 
-function buildTree(cursor: BufferCursor, tags: readonly Tag[], maxBufferLength: number, reused: Tree[]): Tree {
+function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, maxBufferLength: number, reused: Tree[]): Tree {
   function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
     let {type, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
     let node, startPos = start - parentStart
@@ -687,7 +687,7 @@ function buildTree(cursor: BufferCursor, tags: readonly Tag[], maxBufferLength: 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
   let length = children.length ? positions[0] + children[0].length : 0
-  return new Tree(children.reverse(), positions.reverse(), length, tags)
+  return new Tree(children.reverse(), positions.reverse(), length, tags, topType)
 }
 
 function balanceRange(type: number,
