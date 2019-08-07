@@ -51,6 +51,12 @@ describe("TagMatch", () => {
     ist(m.best(new Tag("three"), [new Tag("one"), new Tag("two")]), 2)
   })
 
+  it("can match first-match parents", () => {
+    let m = new TagMatch({"document!lang=javascript literal": 1})
+    ist(m.best(new Tag("literal"), [new Tag("document.lang=javascript")]), 1)
+    ist(m.best(new Tag("literal"), [new Tag("document.lang=javascript"), new Tag("document.lang=html")]), null)
+  })
+
   it("parses strings properly", () => {
     let m = new TagMatch({"a.b=\"foo bar\"": 1})
     ist(m.best(new Tag("z.a.b=\"foo bar\"")), 1)

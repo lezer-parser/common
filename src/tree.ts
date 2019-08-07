@@ -821,7 +821,6 @@ export class Tag {
   /// tag's parts, and whether all the properties in `tag` also occur,
   /// with the same value, in this this tag.
   match(tag: Tag) {
-    if (tag.parts.length == 0) return true
     if (tag.parts.length > this.parts.length || tag.properties.length > this.properties.length)
       return false
     for (let i = 0; i < tag.parts.length; i++)
@@ -841,10 +840,15 @@ export class Tag {
   }
 }
 
+const enum ContextType { Descendant, Child, FirstMatching }
+
+class ContextSelector {
+  constructor(readonly tag: Tag, readonly type: ContextType, readonly second: Tag | null = null) {}
+}
+
 class MatchRule<T> {
   constructor(readonly inner: Tag,
-              readonly parents: readonly Tag[],
-              readonly ops: readonly string[],
+              readonly context: readonly ContextSelector[],
               readonly value: T) {}
 }
 
@@ -868,6 +872,13 @@ export class TagMatch<T> {
   ///   first) or a `>` operator (child selector, which only matches
   ///   if the direct parent matches the first selector).
   ///
+  /// - A selector preceded by two tags separated by an exclamation
+  ///   point. This is a first-ancestor selector, which matches if the
+  ///   first ancestor that matches the tag _before_ the exclamation
+  ///   point also matches the tag _after_ it. (For example
+  ///   `document!lang=javascript literal` to match only literals
+  ///   whose parent document has `lang=javascript`.)
+  ///
   /// - Selectors separated by a comma, which makes this rule match
   ///   any of those selectors.
   ///
@@ -878,24 +889,37 @@ export class TagMatch<T> {
   /// `b` in them to `"Yes`" and tags that have `y` in them whose
   /// direct parent has `x` to `"No"`.
   constructor(readonly spec: {readonly [selector: string]: T}) {
-    let rules = [], token = /\s*([,>]|(?:"(?:[^"\\]|\\.)+"|[^"\s>,])+)\s*/g, m
+    let rules = [], token = /([,>!]|(?:"(?:[^"\\]|\\.)+"|[^!"\s>,])+)\s*/g, m
     for (let selector in spec) {
-      let group: {tags: Tag[], ops: string[]} = {tags: [], ops: []}, groups = [group], childOp = null
+      let groups: string[][] = [[]]
       while (m = token.exec(selector)) {
-        if (m[1] == "," && group.tags.length) {
-          groups.push(group = {tags: [], ops: []})
-        } else if (m[1] == ">") {
-          childOp = m[1]
-        } else {
-          if (group.tags.length) group.ops.push(childOp || " ")
-          group.tags.push(new Tag(m[1]))
-        }
+        if (m[1] == ",") groups.push([])
+        else groups[groups.length - 1].push(m[1])
       }
-      for (let {tags, ops} of groups) {
-        let last = tags.length - 1
-        rules.push(new MatchRule(tags[last], last ? tags.slice(0, last) : none, last ? ops.slice(0, last) : none, spec[selector]))
+      let getTag = (str: string) => {
+        if (!str || /^[>!]$/.test(str)) throw new SyntaxError("Invalid selector: " + selector)
+        return new Tag(str)
+      }
+      for (let group of groups) if (group.length) {
+        let inner = getTag(group[group.length - 1]), context = []
+        for (let i = group.length - 2; i >= 0;) {
+          let next = group[i--]
+          if (next == ">") {
+            context.push(new ContextSelector(getTag(group[i--]), ContextType.Child))
+          } else {
+            let tag = getTag(next)
+            if (group[i] == "!") {
+              i--
+              context.push(new ContextSelector(getTag(group[i--]), ContextType.FirstMatching, tag))
+            } else {
+              context.push(new ContextSelector(tag, ContextType.Descendant))
+            }
+          }
+        }
+        rules.push(new MatchRule(inner, context.length ? context : none, spec[selector]))
       }
     }
+
     let frequencies: {[name: string]: number} = Object.create(null)
     for (let rule of rules)
       forEachName(rule.inner, name => frequencies[name] = (frequencies[name] || 0) + 1)
@@ -954,12 +978,16 @@ export class TagMatch<T> {
   }
 
   private matchContext(rule: MatchRule<T>, context: readonly Tag[]) {
-    if (rule.parents.length == 0) return 1
+    if (rule.context.length == 0) return 1
     let pos = context.length, score = 1
-    outer: for (let i = rule.parents.length - 1; i >= 0; i--) {
-      let parent = rule.parents[i], op = rule.ops[i]
-      for (let j = pos - 1; j >= (op == ">" ? pos - 1 : 0); j--) if (context[j].match(parent)) {
-        score += 100 + parent.specificity
+    outer: for (let cx of rule.context) {
+      for (let j = pos - 1; j >= (cx.type == ContextType.Child ? pos - 1 : 0); j--) if (context[j].match(cx.tag)) {
+        if (cx.type == ContextType.FirstMatching) {
+          if (!context[j].match(cx.second!)) return null
+          score += 100 + cx.second!.specificity
+        } else {
+          score += 100 + cx.tag.specificity
+        }
         pos = j
         continue outer
       }
