@@ -4,6 +4,8 @@ export const DefaultBufferLength = 1024
 // Checks whether the given node type is a tagged node.
 function isTagged(type: number) { return (type & 1) > 0 }
 
+export const ErrorType = 3
+
 /// The `unchanged` method expects changed ranges in this format.
 export interface ChangedRange {
   /// The start of the change in the start document
@@ -27,10 +29,10 @@ export interface ChangedRange {
 ///
 ///  * Any other value to immediately stop iteration and return the
 ///    value from the `iterate` method.
-export type EnterFunc<T> = (tag: Tag, start: number, end: number) => T | false | undefined
+export type EnterFunc<T> = (tag: Tag, start: number, end: number, type: number) => T | false | undefined
 
 /// Signature of the `leave` function passed to `Subtree.iterate`.
-export type LeaveFunc = (tag: Tag, start: number, end: number) => void
+export type LeaveFunc = (tag: Tag, start: number, end: number, type: number) => void
 
 class Iteration<T> {
   result: T | undefined = undefined
@@ -40,8 +42,8 @@ class Iteration<T> {
 
   get done() { return this.result !== undefined }
 
-  doEnter(tag: Tag, start: number, end: number) {
-    let value = this.enter(tag, start, end)
+  doEnter(tag: Tag, start: number, end: number, type: number) {
+    let value = this.enter(tag, start, end, type)
     if (value === undefined) return true
     if (value !== false) this.result = value
     return false
@@ -54,6 +56,8 @@ export abstract class Subtree {
   /// The subtree's parent. Will be `null` for the root node
   abstract parent: Subtree | null
 
+  /// The node's type id.
+  abstract type: number
   /// The node's tag.
   abstract tag: Tag
   /// The start source offset of this subtree
@@ -138,10 +142,10 @@ export class Tree extends Subtree {
     /// The tree's child nodes. Children small enough to fit in a
     /// `TreeBuffer` will be represented as such, other children can be
     /// further `Tree` instances with their own internal structure.
-    readonly children: (Tree | TreeBuffer)[],
+    readonly children: readonly (Tree | TreeBuffer)[],
     /// The positions (offsets relative to the start of this tree) of
     /// the children.
-    readonly positions: number[],
+    readonly positions: readonly number[],
     /// The total length of this tree.
     readonly length: number,
     /// Mapping from node types to tags for this grammar @internal
@@ -250,7 +254,7 @@ export class Tree extends Subtree {
 
   /// @internal
   iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
-    if (isTagged(this.type) && !iter.doEnter(this.tag, offset, offset + this.length))
+    if (isTagged(this.type) && !iter.doEnter(this.tag, offset, offset + this.length, this.type))
       return
 
     if (from <= to) {
@@ -268,7 +272,7 @@ export class Tree extends Subtree {
         child.iterInner(from, to, start, iter)
       }
     }      
-    if (iter.leave && isTagged(this.type)) iter.leave(this.tag, offset, offset + this.length)
+    if (iter.leave && isTagged(this.type)) iter.leave(this.tag, offset, offset + this.length, this.type)
     return
   }
 
@@ -403,12 +407,12 @@ export class TreeBuffer {
 
   /// @internal
   iterChild<T>(from: number, to: number, offset: number, index: number, iter: Iteration<T>) {
-    let tag = this.tags[this.buffer[index++] >> 1], start = this.buffer[index++] + offset,
+    let type = this.buffer[index++] >> 1, tag = this.tags[type], start = this.buffer[index++] + offset,
         end = this.buffer[index++] + offset, endIndex = this.buffer[index++]
     if (start > to) return this.buffer.length
-    if (end >= from && iter.doEnter(tag, start, end)) {
+    if (end >= from && iter.doEnter(tag, start, end, type)) {
       while (index < endIndex && !iter.done) index = this.iterChild(from, to, offset, index, iter)
-      if (iter.leave) iter.leave(tag, start, end)
+      if (iter.leave) iter.leave(tag, start, end, type)
     }
     return endIndex
   }
@@ -450,7 +454,7 @@ export class TreeBuffer {
         let type = this.buffer[base], start = this.buffer[base + 1] + offset, end = this.buffer[base + 2] + offset
         takeNext()
         if (start <= from && end >= to) {
-          if (!iter.doEnter(this.tags[type >> 1], start, end)) {
+          if (!iter.doEnter(this.tags[type >> 1], start, end, type)) {
             // Skip the entire node
             index = base
             while (nextEnd > base) takeNext()
@@ -461,8 +465,8 @@ export class TreeBuffer {
       let endIndex = this.buffer[--index], end = this.buffer[--index] + offset,
         start = this.buffer[--index] + offset, type = this.buffer[--index]
       if (start > from || end < to) continue
-      if ((endIndex != index + 4 || iter.doEnter(this.tags[type >> 1], start, end)) && iter.leave)
-        iter.leave(this.tags[type >> 1], start, end)
+      if ((endIndex != index + 4 || iter.doEnter(this.tags[type >> 1], start, end, type)) && iter.leave)
+        iter.leave(this.tags[type >> 1], start, end, type)
     }
   }
 
@@ -490,6 +494,8 @@ class NodeSubtree extends Subtree {
               readonly parent: Subtree) {
     super()
   }
+
+  get type() { return this.node.type }
 
   get tag() { return this.node.tag }
 
@@ -526,7 +532,8 @@ class BufferSubtree extends Subtree {
     super()
   }
 
-  get tag() { return this.buffer.tags[this.buffer.buffer[this.index] >> 1] }
+  get type() { return this.buffer.buffer[this.index] }
+  get tag() { return this.buffer.tags[this.type >> 1] }
   get start() { return this.buffer.buffer[this.index + 1] + this.bufferStart }
   get end() { return this.buffer.buffer[this.index + 2] + this.bufferStart }
 

@@ -10,6 +10,8 @@
 
 @LeaveFunc
 
+@ErrorType
+
 ### Node tags
 
 @Tag
