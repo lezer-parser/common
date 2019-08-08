@@ -18,6 +18,8 @@ export interface ChangedRange {
   toB: number
 }
 
+const none: readonly any[] = [], noChildren: {[part: string]: any} = Object.create(null)
+
 /// Signature of the `enter` function passed to `Subtree.iterate`. It is given
 /// a node's tag, start position, and end position for every node,
 /// and can return...
@@ -164,8 +166,7 @@ export class Tree extends Subtree {
 
   /// @internal
   get tag() {
-    if (!isTagged(this.type)) throw new RangeError("Requesting tag for an untagged tree")
-    return this.tags[this.type >> 1]
+    return isTagged(this.type) ? this.tags[this.type >> 1] : nullTag
   }
 
   /// Check whether this tree's tag belongs to a given set of tags.
@@ -834,6 +835,8 @@ export class Tag {
   }
 }
 
+const nullTag = new Tag("null")
+
 function matchProperties(props: readonly string[], against: readonly string[]) {
   for (let i = 0; i < against.length; i += 2) {
     let name = against[i], matched = false
@@ -855,8 +858,6 @@ class MatchRule<T> {
               readonly context: readonly ContextSelector[],
               readonly value: T) {}
 }
-
-const none: readonly any[] = [], noChildren: {[part: string]: any} = Object.create(null)
 
 class MatchTree<T> {
   constructor(readonly rules: readonly MatchRule<T>[],
