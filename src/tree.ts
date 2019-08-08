@@ -4,7 +4,7 @@ export const DefaultBufferLength = 1024
 // Checks whether the given node type is a tagged node.
 function isTagged(type: number) { return (type & 1) > 0 }
 
-export const ErrorType = 3
+export const ErrorType = 1
 
 /// The `unchanged` method expects changed ranges in this format.
 export interface ChangedRange {
