@@ -1,10 +1,7 @@
 /// The default maximum length of a `TreeBuffer` node.
 export const DefaultBufferLength = 1024
 
-// Checks whether the given node type is a tagged node.
-function isTagged(type: number) { return (type & 1) > 0 }
-
-export const ErrorType = 1
+export const ErrorType = 1 // FIXME make this a flag
 
 /// The `unchanged` method expects changed ranges in this format.
 export interface ChangedRange {
@@ -31,10 +28,10 @@ const none: readonly any[] = [], noChildren: {[part: string]: any} = Object.crea
 ///
 ///  * Any other value to immediately stop iteration and return the
 ///    value from the `iterate` method.
-export type EnterFunc<T> = (tag: Tag, start: number, end: number, type: number) => T | false | undefined
+export type EnterFunc<T> = (type: NodeType, start: number, end: number) => T | false | undefined
 
 /// Signature of the `leave` function passed to `Subtree.iterate`.
-export type LeaveFunc = (tag: Tag, start: number, end: number, type: number) => void
+export type LeaveFunc = (type: NodeType, start: number, end: number) => void
 
 class Iteration<T> {
   result: T | undefined = undefined
@@ -44,13 +41,136 @@ class Iteration<T> {
 
   get done() { return this.result !== undefined }
 
-  doEnter(tag: Tag, start: number, end: number, type: number) {
-    let value = this.enter(tag, start, end, type)
+  doEnter(type: NodeType, start: number, end: number) {
+    let value = this.enter(type, start, end)
     if (value === undefined) return true
     if (value !== false) this.result = value
     return false
   }
 }
+
+
+function badTag(tag: string): never {
+  throw new SyntaxError("Invalid tag " + JSON.stringify(tag))
+}
+
+/// Tags represent information about nodes. They are an ordered
+/// collection of parts (more specific ones first) written in the form
+/// `boolean.literal.expression` (where `boolean` further specifies
+/// `literal`, which in turn further specifies `expression`).
+///
+/// A part may also have a value, written after an `=` sign, as in
+/// `tag.selector.lang=css`. Part names and values may be double
+/// quoted (using JSON string notation) when they contain non-word
+/// characters.
+///
+/// This wrapper object pre-parses the tag for easy querying.
+export class Tag {
+  /// The parts of the tag (more general first, so in inverted order
+  /// from tag notation).
+  parts: readonly string[]
+  // The tag's properties, as pairs of `name`, `value` strings (the
+  // even indices hold names, the odd values).
+  properties: readonly string[]
+
+  /// Create a tag object from a string.
+  constructor(tag: string) {
+    let parts = [], properties = []
+    if (tag.length) for (let pos = 0;;) {
+      let start = pos
+      while (pos < tag.length) {
+        let next = tag.charCodeAt(pos)
+        if (next == 61 || next == 46) break // "=" or "."
+        pos++
+      }
+      if (pos == start) badTag(tag)
+      let name = tag.slice(start, pos)
+      if (tag.charCodeAt(pos) == 61 /* '=' */) {
+        let valStart = ++pos, value
+        if (tag.charCodeAt(pos) == 34 /* '"' */) {
+          for (pos++;;) {
+            if (pos >= tag.length) badTag(tag)
+            let next = tag.charCodeAt(pos++)
+            if (next == 92) pos++
+            else if (next == 34) break
+          }
+          value = JSON.parse(tag.slice(valStart, pos))
+        } else {
+          while (pos < tag.length && tag.charCodeAt(pos) != 46 /* '.' */) pos++
+          value = tag.slice(valStart, pos)
+        }
+        properties.push(name, value)
+      } else {
+        parts.push(name)
+      }
+      if (pos == tag.length) break
+      if (tag.charCodeAt(pos) != 46 /* '.' */) badTag(tag)
+      pos++
+    }
+    this.parts = parts.reverse()
+    this.properties = properties.length ? properties : none
+  }
+
+  /// @internal
+  toString() {
+    let result = ""
+    for (let i = this.parts.length - 1; i >= 0; i--) {
+      if (result) result += "."
+      result += this.parts[i]
+    }
+    for (let i = 0; i < this.properties.length; i += 2) {
+      if (result) result += "."
+      result += this.properties[i]
+      result += "="
+      result += /\W/.test(this.properties[i + 1]) ? JSON.stringify(this.properties[i + 1]) : this.properties[i + 1]
+    }
+    return result
+  }
+
+  /// See whether `tag`'s parts are a suffix of (or equal to) this
+  /// tag's parts, and whether all the properties in `tag` also occur,
+  /// with the same value, in this this tag.
+  match(tag: Tag) {
+    if (tag.parts.length > this.parts.length || tag.properties.length > this.properties.length)
+      return false
+    for (let i = 0; i < tag.parts.length; i++)
+      if (tag.parts[i] != this.parts[i]) return false
+    return matchProperties(this.properties, tag.properties)
+  }
+
+  /// The number of parts and properties present in this tag.
+  get specificity() {
+    return this.parts.length + (this.properties.length >> 1)
+  }
+
+  static none = new Tag("")
+}
+
+export enum TypeFlag { Repeat = 1, Skipped = 2, Error = 4 }
+
+export class NodeType {
+  constructor(
+    readonly group: NodeGroup,
+    readonly tag: Tag,
+    readonly flags: number,
+    readonly id: number) {}
+
+  static none: NodeType
+}
+
+export class NodeGroup {
+  readonly types: NodeType[] = []
+  readonly metadata: {[name: string]: any} = Object.create(null)
+
+  define(tag: Tag, flags: number = 0) {
+    let type = new NodeType(this, tag, flags, this.types.length)
+    this.types.push(type)
+    return type
+  }
+}
+
+const noneGroup = new NodeGroup
+NodeType.none = noneGroup.define(Tag.none)
 
 /// A subtree is a representation of part of the syntax tree. It may
 /// either be the tree root, or a tagged node.
@@ -58,10 +178,10 @@ export abstract class Subtree {
   /// The subtree's parent. Will be `null` for the root node
   abstract parent: Subtree | null
 
-  /// The node's type id.
-  abstract type: number
-  /// The node's tag.
-  abstract tag: Tag
+  /// The node's type
+  abstract type: NodeType
+  // Shorthand for `.type.tag`.
+  get tag() { return this.type.tag }
   /// The start source offset of this subtree
   abstract start: number
   /// The end source offset
@@ -141,6 +261,8 @@ export class Tree extends Subtree {
 
   /// @internal
   constructor(
+    /// @internal
+    readonly type: NodeType,
     /// The tree's child nodes. Children small enough to fit in a
     /// `TreeBuffer` will be represented as such, other children can be
     /// further `Tree` instances with their own internal structure.
@@ -148,12 +270,8 @@ export class Tree extends Subtree {
     /// The positions (offsets relative to the start of this tree) of
     /// the children.
     readonly positions: readonly number[],
-    /// The total length of this tree.
-    readonly length: number,
-    /// Mapping from node types to tags for this grammar @internal
-    readonly tags: readonly Tag[],
-    /// This tree's node type @internal
-    readonly type: number
+    /// The total length of this tree @internal
+    readonly length: number
   ) {
     super()
   }
@@ -165,18 +283,8 @@ export class Tree extends Subtree {
   get end() { return this.length }
 
   /// @internal
-  get tag() {
-    return isTagged(this.type) ? this.tags[this.type >> 1] : nullTag
-  }
-
-  /// Check whether this tree's tag belongs to a given set of tags.
-  /// Can be used to determine that a node belongs to the grammar
-  /// defined by a specific parser.
-  isPartOf(tags: readonly Tag[]) { return this.tags == tags }
-
-  /// @internal
   toString(): string {
-    let name = !isTagged(this.type) ? null : this.tag.tag
+    let name = this.tag.toString()
     let children = this.children.map(c => c.toString()).join()
     return !name ? children : name + (children.length ? "(" + children + ")" : "")
   }
@@ -226,7 +334,7 @@ export class Tree extends Subtree {
       pos = cutAt(this, next.toA, 1)
       off += (next.toB - next.fromB) - (next.toA - next.fromA)
     }
-    return new Tree(children, positions, this.length + off, this.tags, 0)
+    return new Tree(NodeType.none, children, positions, this.length + off)
   }
 
   /// Take the part of the tree up to the given position.
@@ -240,11 +348,11 @@ export class Tree extends Subtree {
       children.push(to <= at ? child : child.cut(at - from))
       positions.push(from)
     }
-    return new Tree(children, positions, at, this.tags, this.type)
+    return new Tree(this.type, children, positions, at)
   }
 
   /// The empty tree
-  static empty = new Tree([], [], 0, [], 0)
+  static empty = new Tree(NodeType.none, [], [], 0)
 
   /// @internal
   iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc) {
@@ -255,7 +363,7 @@ export class Tree extends Subtree {
 
   /// @internal
   iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
-    if (isTagged(this.type) && !iter.doEnter(this.tag, offset, offset + this.length, this.type))
+    if (this.type.tag != Tag.none && !iter.doEnter(this.type, offset, offset + this.length))
       return
 
     if (from <= to) {
@@ -273,7 +381,7 @@ export class Tree extends Subtree {
         child.iterInner(from, to, start, iter)
       }
     }      
-    if (iter.leave && isTagged(this.type)) iter.leave(this.tag, offset, offset + this.length, this.type)
+    if (iter.leave && this.type.tag != Tag.none) iter.leave(this.type, offset, offset + this.length)
     return
   }
 
@@ -307,7 +415,7 @@ export class Tree extends Subtree {
         let child = this.children[select], childStart = this.positions[select] + start
         if (child.length == 0 && childStart == pos) continue
         if (child instanceof Tree) {
-          if (isTagged(child.type)) return new NodeSubtree(child, childStart, parent)
+          if (child.type.tag != Tag.none) return new NodeSubtree(child, childStart, parent)
           return child.findChild(pos, side, childStart, parent)
         } else {
           let found = child.findIndex(pos, side, childStart, 0, child.buffer.length)
@@ -328,24 +436,23 @@ export class Tree extends Subtree {
   /// big enough to fit this tree at its start.
   append(other: Tree) {
     if (other.children.length && other.positions[0] < this.length) throw new Error("Can't append overlapping trees")
-    return new Tree(this.children.concat(other.children), this.positions.concat(other.positions), other.length, this.tags, this.type)
+    return new Tree(this.type, this.children.concat(other.children), this.positions.concat(other.positions), other.length)
   }
 
   /// Balance the direct children of this tree. Should only be used on
   /// non-tagged trees.
   balance(maxBufferLength = DefaultBufferLength) {
     return this.children.length <= BalanceBranchFactor ? this :
-      balanceRange(this.type, this.tags, this.children, this.positions, 0, this.children.length, 0, maxBufferLength)
+      balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0, maxBufferLength)
   }
 
   /// Build a tree from a postfix-ordered buffer of node information,
   /// or a cursor over such a buffer.
-  static build(buffer: BufferCursor | readonly number[],
-               tags: readonly Tag[], topType: number,
+  static build(buffer: BufferCursor | readonly number[], topType: NodeType,
                maxBufferLength: number = DefaultBufferLength,
                reused: Tree[] = []) {
     return buildTree(Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor,
-                     tags, topType, maxBufferLength, reused)
+                     topType, maxBufferLength, reused)
   }
 }
 
@@ -358,7 +465,7 @@ Tree.prototype.parent = null
 export class TreeBuffer {
   /// Create a tree buffer
   // FIXME store a type in here to efficiently represent nodes whose children all fit in a buffer (esp repeat nodes)?
-  constructor(readonly buffer: Uint16Array, readonly length: number, readonly tags: readonly Tag[]) {}
+  constructor(readonly buffer: Uint16Array, readonly length: number, readonly group: NodeGroup) {}
 
   /// @internal
   toString() {
@@ -370,8 +477,8 @@ export class TreeBuffer {
 
   /// @internal
   childToString(index: number, parts: string[]): number {
-    let type = this.buffer[index], endIndex = this.buffer[index + 3]
-    let result = this.tags[type >> 1].tag
+    let id = this.buffer[index], endIndex = this.buffer[index + 3]
+    let result = this.group.types[id].tag.toString()
     index += 4
     if (endIndex > index) {
       let children: string[] = []
@@ -393,7 +500,7 @@ export class TreeBuffer {
       newBuffer[i + 2] = Math.min(at, this.buffer[i + 2])
       newBuffer[i + 3] = Math.min(this.buffer[i + 3], cutPoint)
     }
-    return new TreeBuffer(newBuffer, Math.min(at, this.length), this.tags)
+    return new TreeBuffer(newBuffer, Math.min(at, this.length), this.group)
   }
 
   /// @internal
@@ -408,12 +515,12 @@ export class TreeBuffer {
 
   /// @internal
   iterChild<T>(from: number, to: number, offset: number, index: number, iter: Iteration<T>) {
-    let type = this.buffer[index++] >> 1, tag = this.tags[type], start = this.buffer[index++] + offset,
+    let type = this.group.types[this.buffer[index++]], start = this.buffer[index++] + offset,
         end = this.buffer[index++] + offset, endIndex = this.buffer[index++]
     if (start > to) return this.buffer.length
-    if (end >= from && iter.doEnter(tag, start, end, type)) {
+    if (end >= from && iter.doEnter(type, start, end)) {
       while (index < endIndex && !iter.done) index = this.iterChild(from, to, offset, index, iter)
-      if (iter.leave) iter.leave(tag, start, end, type)
+      if (iter.leave) iter.leave(type, start, end)
     }
     return endIndex
   }
@@ -452,10 +559,10 @@ export class TreeBuffer {
     run: for (let index = endIndex; index > startIndex && !iter.done;) {
       while (nextEnd == index) {
         let base = nextStart
-        let type = this.buffer[base], start = this.buffer[base + 1] + offset, end = this.buffer[base + 2] + offset
+        let id = this.buffer[base], start = this.buffer[base + 1] + offset, end = this.buffer[base + 2] + offset
         takeNext()
         if (start <= from && end >= to) {
-          if (!iter.doEnter(this.tags[type >> 1], start, end, type)) {
+          if (!iter.doEnter(this.group.types[id], start, end)) {
             // Skip the entire node
             index = base
             while (nextEnd > base) takeNext()
@@ -464,10 +571,10 @@ export class TreeBuffer {
         }
       }
       let endIndex = this.buffer[--index], end = this.buffer[--index] + offset,
-        start = this.buffer[--index] + offset, type = this.buffer[--index]
+        start = this.buffer[--index] + offset, id = this.buffer[--index]
       if (start > from || end < to) continue
-      if ((endIndex != index + 4 || iter.doEnter(this.tags[type >> 1], start, end, type)) && iter.leave)
-        iter.leave(this.tags[type >> 1], start, end, type)
+      if ((endIndex != index + 4 || iter.doEnter(this.group.types[id], start, end)) && iter.leave)
+        iter.leave(this.group.types[id], start, end)
     }
   }
 
@@ -497,8 +604,6 @@ class NodeSubtree extends Subtree {
   }
 
   get type() { return this.node.type }
-
-  get tag() { return this.node.tag }
 
   get end() { return this.start + this.node.length }
 
@@ -533,8 +638,7 @@ class BufferSubtree extends Subtree {
     super()
   }
 
-  get type() { return this.buffer.buffer[this.index] }
-  get tag() { return this.buffer.tags[this.type >> 1] }
+  get type() { return this.buffer.group.types[this.buffer.buffer[this.index]] }
   get start() { return this.buffer.buffer[this.index + 1] + this.bufferStart }
   get end() { return this.buffer.buffer[this.index + 2] + this.bufferStart }
 
@@ -576,7 +680,7 @@ class BufferSubtree extends Subtree {
 /// a tree buffer. You probably won't need it.
 export interface BufferCursor {
   pos: number
-  type: number
+  id: number
   start: number
   end: number
   size: number
@@ -587,7 +691,7 @@ export interface BufferCursor {
 class FlatBufferCursor implements BufferCursor {
   constructor(readonly buffer: readonly number[], public index: number) {}
 
-  get type() { return this.buffer[this.index - 4] }
+  get id() { return this.buffer[this.index - 4] }
   get start() { return this.buffer[this.index - 3] }
   get end() { return this.buffer[this.index - 2] }
   get size() { return this.buffer[this.index - 1] }
@@ -601,23 +705,29 @@ class FlatBufferCursor implements BufferCursor {
 
 const BalanceBranchFactor = 8
 
-function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, maxBufferLength: number, reused: Tree[]): Tree {
+function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: number, reused: Tree[]): Tree {
+  let types = topType.group.types
   function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
-    let {type, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
-    let node, startPos = start - parentStart
-    if (size < 0) {
+    let {id, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
+    let startPos = start - parentStart
+    if (size < 0) { // Reused node
+      children.push(reused[id])
+      positions.push(startPos)
       cursor.next()
-      node = reused[type]
-    } else if (end - start <= maxBufferLength &&
-               (buffer = findBufferSize(cursor.pos - minPos, isTagged(type) ? -1 : type))) {
+      return
+    }
+
+    let type = types[id], node
+    if (end - start <= maxBufferLength &&
+        (buffer = findBufferSize(cursor.pos - minPos, (type.flags & TypeFlag.Repeat) ? id : -1))) {
       // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
         index = copyToBuffer(buffer.start, data, index)
-      node = new TreeBuffer(data, end - buffer.start, tags)
+      node = new TreeBuffer(data, end - buffer.start, type.group)
       // Wrap if this is a repeat node
-      if (!isTagged(type)) node = new Tree([node], [0], end - buffer.start, tags, type)
+      if (type.flags & TypeFlag.Repeat) node = new Tree(type, [node], [0], end - buffer.start)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -626,17 +736,17 @@ function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, 
       while (cursor.pos > endPos)
         takeNode(start, endPos, localChildren, localPositions)
       localChildren.reverse(); localPositions.reverse()
-      node = new Tree(localChildren, localPositions, end - start, tags, type)
+      node = new Tree(type, localChildren, localPositions, end - start)
     }
 
     children.push(node)
     positions.push(startPos)
     // End of a (possible) sequence of repeating nodes—might need to balance
-    if (!isTagged(type) && (cursor.pos == 0 || cursor.type != type))
+    if (type && (type.flags & TypeFlag.Repeat) && (cursor.pos == 0 || cursor.id != id))
       maybeBalanceSiblings(children, positions, type)
   }
 
-  function maybeBalanceSiblings(children: (Tree | TreeBuffer)[], positions: number[], type: number) {
+  function maybeBalanceSiblings(children: (Tree | TreeBuffer)[], positions: number[], type: NodeType) {
     let to = children.length, from = to - 1
     for (; from > 0; from--) {
       let prev = children[from - 1]
@@ -644,14 +754,14 @@ function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, 
     }
     if (to - from < BalanceBranchFactor) return
     let start = positions[to - 1]
-    let wrapped = balanceRange(type, tags, children.slice(from, to).reverse(), positions.slice(from, to).reverse(),
+    let wrapped = balanceRange(type, children.slice(from, to).reverse(), positions.slice(from, to).reverse(),
                                0, to - from, start, maxBufferLength)
     children.length = positions.length = from + 1
     children[from] = wrapped
     positions[from] = start
   }
 
-  function findBufferSize(maxSize: number, type: number) {
+  function findBufferSize(maxSize: number, id: number) {
     // Scan through the buffer to find previous siblings that fit
     // together in a TreeBuffer, and don't contain any reused nodes
     // (which can't be stored in a buffer)
@@ -661,13 +771,13 @@ function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, 
     let size = 0, start = 0, skip = 0, minStart = fork.end - maxBufferLength
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
-      let localSkipped = isTagged(fork.type) ? 0 : 4
-      if (nodeSize < 0 || startPos < minPos || fork.start < minStart || type > -1 && fork.type != type) break
+      if (nodeSize < 0 || startPos < minPos || fork.start < minStart || id > -1 && fork.id != id) break
+      let localSkipped = (types[fork.id].flags & TypeFlag.Repeat) ? 4 : 0
       let nodeStart = fork.start
       fork.next()
       while (fork.pos > startPos) {
         if (fork.size < 0) break scan
-        if (!isTagged(fork.type)) localSkipped += 4
+        if (types[fork.id].flags & TypeFlag.Repeat) localSkipped += 4
         fork.next()
       }
       start = nodeStart
@@ -678,7 +788,7 @@ function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, 
   }
 
   function copyToBuffer(bufferStart: number, buffer: Uint16Array, index: number): number {
-    let {type, start, end, size} = cursor
+    let {id, start, end, size} = cursor
     cursor.next()
     let startIndex = index
     if (size > 4) {
@@ -686,11 +796,11 @@ function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, 
       while (cursor.pos > endPos)
         index = copyToBuffer(bufferStart, buffer, index)
     }
-    if (isTagged(type)) { // Don't copy repeat nodes into buffers
+    if (!(types[id].flags & TypeFlag.Repeat)) { // Don't copy repeat nodes into buffers
       buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
-      buffer[--index] = type
+      buffer[--index] = id
     }
     return index
   }
@@ -698,11 +808,10 @@ function buildTree(cursor: BufferCursor, tags: readonly Tag[], topType: number, 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
   let length = children.length ? positions[0] + children[0].length : 0
-  return new Tree(children.reverse(), positions.reverse(), length, tags, topType)
+  return new Tree(topType, children.reverse(), positions.reverse(), length)
 }
 
-function balanceRange(type: number,
-                      tags: readonly Tag[],
+function balanceRange(type: NodeType,
                       children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
                       from: number, to: number,
                       start: number, maxBufferLength: number): Tree {
@@ -739,103 +848,17 @@ function balanceRange(type: number,
           }
         } else {
           // Wrap with our type to make reuse possible
-          only = new Tree([only], [0], only.length, tags, type)
+          only = new Tree(type, [only], [0], only.length)
         }
         localChildren.push(only)
       } else {
-        localChildren.push(balanceRange(type, tags, children, positions, groupFrom, i, groupStart, maxBufferLength))
+        localChildren.push(balanceRange(type, children, positions, groupFrom, i, groupStart, maxBufferLength))
       }
       localPositions.push(groupStart - start)
     }
   }
-  return new Tree(localChildren, localPositions, length, tags, type)
+  return new Tree(type, localChildren, localPositions, length)
 }
-
-function badTag(tag: string): never {
-  throw new SyntaxError("Invalid tag " + JSON.stringify(tag))
-}
-
-/// Tags represent information about nodes. They are an ordered
-/// collection of parts (more specific ones first) written in the form
-/// `boolean.literal.expression` (where `boolean` further specifies
-/// `literal`, which in turn further specifies `expression`).
-///
-/// A part may also have a value, written after an `=` sign, as in
-/// `tag.selector.lang=css`. Part names and values may be double
-/// quoted (using JSON string notation) when they contain non-word
-/// characters.
-///
-/// This wrapper object pre-parses the tag for easy querying.
-export class Tag {
-  /// The parts of the tag (more general first, so in inverted order
-  /// from tag notation).
-  parts: readonly string[]
-  // The tag's properties, as pairs of `name`, `value` strings (the
-  // even indices hold names, the odd values).
-  properties: readonly string[]
-
-  /// Create a tag object from a string.
-  constructor(
-    /// The string that the tag is based on.
-    readonly tag: string
-  ) {
-    let parts = [], properties = []
-    for (let pos = 0;;) {
-      let start = pos
-      while (pos < tag.length) {
-        let next = tag.charCodeAt(pos)
-        if (next == 61 || next == 46) break // "=" or "."
-        pos++
-      }
-      if (pos == start) badTag(tag)
-      let name = tag.slice(start, pos)
-      if (tag.charCodeAt(pos) == 61 /* '=' */) {
-        let valStart = ++pos, value
-        if (tag.charCodeAt(pos) == 34 /* '"' */) {
-          for (pos++;;) {
-            if (pos >= tag.length) badTag(tag)
-            let next = tag.charCodeAt(pos++)
-            if (next == 92) pos++
-            else if (next == 34) break
-          }
-          value = JSON.parse(tag.slice(valStart, pos))
-        } else {
-          while (pos < tag.length && tag.charCodeAt(pos) != 46 /* '.' */) pos++
-          value = tag.slice(valStart, pos)
-        }
-        properties.push(name, value)
-      } else {
-        parts.push(name)
-      }
-      if (pos == tag.length) break
-      if (tag.charCodeAt(pos) != 46 /* '.' */) badTag(tag)
-      pos++
-    }
-    this.parts = parts.reverse()
-    this.properties = properties.length ? properties : none
-  }
-
-  /// @internal
-  toString() { return this.tag }
-
-  /// See whether `tag`'s parts are a suffix of (or equal to) this
-  /// tag's parts, and whether all the properties in `tag` also occur,
-  /// with the same value, in this this tag.
-  match(tag: Tag) {
-    if (tag.parts.length > this.parts.length || tag.properties.length > this.properties.length)
-      return false
-    for (let i = 0; i < tag.parts.length; i++)
-      if (tag.parts[i] != this.parts[i]) return false
-    return matchProperties(this.properties, tag.properties)
-  }
-
-  /// The number of parts and properties present in this tag.
-  get specificity() {
-    return this.parts.length + (this.properties.length >> 1)
-  }
-}
-
-const nullTag = new Tag("null")
 
 function matchProperties(props: readonly string[], against: readonly string[]) {
   for (let i = 0; i < against.length; i += 2) {
