@@ -1,8 +1,6 @@
 /// The default maximum length of a `TreeBuffer` node.
 export const DefaultBufferLength = 1024
 
-export const ErrorType = 1 // FIXME make this a flag
-
 /// The `unchanged` method expects changed ranges in this format.
 export interface ChangedRange {
   /// The start of the change in the start document
@@ -146,24 +144,33 @@ export class Tag {
   static none = new Tag("")
 }
 
-export enum TypeFlag { Repeat = 1, Skipped = 2, Error = 4 }
+const enum TypeFlag { Repeated = 1, Skipped = 2, Error = 4 }
 
 export class NodeType {
+  /// @internal
   constructor(
     readonly group: NodeGroup,
     readonly tag: Tag,
-    readonly flags: number,
+    private flags: number,
     readonly id: number) {}
+
+  get repeated() { return (this.flags & TypeFlag.Repeated) > 0 }
+  get skipped() { return (this.flags & TypeFlag.Skipped) > 0 }
+  get error() { return (this.flags & TypeFlag.Error) > 0 }
 
   static none: NodeType
 }
+
+const noFlags = {}
 
 export class NodeGroup {
   readonly types: NodeType[] = []
   readonly metadata: {[name: string]: any} = Object.create(null)
 
-  define(tag: Tag, flags: number = 0) {
-    let type = new NodeType(this, tag, flags, this.types.length)
+  define(tag: Tag, flags: {repeated?: boolean, skipped?: boolean, error?: boolean} = noFlags) {
+    let flagNum = flags == noFlags ? 0 : (flags.repeated ? TypeFlag.Repeated : 0) |
+      (flags.skipped ? TypeFlag.Skipped : 0) | (flags.error ? TypeFlag.Error : 0)
+    let type = new NodeType(this, tag, flagNum, this.types.length)
     this.types.push(type)
     return type
   }
@@ -719,7 +726,7 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
 
     let type = types[id], node
     if (end - start <= maxBufferLength &&
-        (buffer = findBufferSize(cursor.pos - minPos, (type.flags & TypeFlag.Repeat) ? id : -1))) {
+        (buffer = findBufferSize(cursor.pos - minPos, type.repeated ? id : -1))) {
       // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
@@ -727,7 +734,7 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
         index = copyToBuffer(buffer.start, data, index)
       node = new TreeBuffer(data, end - buffer.start, type.group)
       // Wrap if this is a repeat node
-      if (type.flags & TypeFlag.Repeat) node = new Tree(type, [node], [0], end - buffer.start)
+      if (type.repeated) node = new Tree(type, [node], [0], end - buffer.start)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -742,7 +749,7 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
     children.push(node)
     positions.push(startPos)
     // End of a (possible) sequence of repeating nodes—might need to balance
-    if (type && (type.flags & TypeFlag.Repeat) && (cursor.pos == 0 || cursor.id != id))
+    if (type.repeated && (cursor.pos == 0 || cursor.id != id))
       maybeBalanceSiblings(children, positions, type)
   }
 
@@ -772,12 +779,12 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
       if (nodeSize < 0 || startPos < minPos || fork.start < minStart || id > -1 && fork.id != id) break
-      let localSkipped = (types[fork.id].flags & TypeFlag.Repeat) ? 4 : 0
+      let localSkipped = types[fork.id].repeated ? 4 : 0
       let nodeStart = fork.start
       fork.next()
       while (fork.pos > startPos) {
         if (fork.size < 0) break scan
-        if (types[fork.id].flags & TypeFlag.Repeat) localSkipped += 4
+        if (types[fork.id].repeated) localSkipped += 4
         fork.next()
       }
       start = nodeStart
@@ -796,7 +803,7 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
       while (cursor.pos > endPos)
         index = copyToBuffer(bufferStart, buffer, index)
     }
-    if (!(types[id].flags & TypeFlag.Repeat)) { // Don't copy repeat nodes into buffers
+    if (!types[id].repeated) { // Don't copy repeat nodes into buffers
       buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
