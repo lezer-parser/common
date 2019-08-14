@@ -13,8 +13,6 @@ export interface ChangedRange {
   toB: number
 }
 
-const none: readonly any[] = [], noChildren: {[part: string]: any} = Object.create(null)
-
 /// Signature of the `enter` function passed to `Subtree.iterate`. It is given
 /// a node's tag, start position, and end position for every node,
 /// and can return...
@@ -47,137 +45,74 @@ class Iteration<T> {
   }
 }
 
+let nextPropID = 0
 
-function badTag(tag: string): never {
-  throw new SyntaxError("Invalid tag " + JSON.stringify(tag))
-}
-
-/// Tags represent information about nodes. They are an ordered
-/// collection of parts (more specific ones first) written in the form
-/// `boolean.literal.expression` (where `boolean` further specifies
-/// `literal`, which in turn further specifies `expression`).
-///
-/// A part may also have a value, written after an `=` sign, as in
-/// `tag.selector.lang=css`. Part names and values may be double
-/// quoted (using JSON string notation) when they contain non-word
-/// characters.
-///
-/// This wrapper object pre-parses the tag for easy querying.
-export class Tag {
-  /// The parts of the tag (more general first, so in inverted order
-  /// from tag notation).
-  parts: readonly string[]
-  // The tag's properties, as pairs of `name`, `value` strings (the
-  // even indices hold names, the odd values).
-  properties: readonly string[]
-
-  /// Create a tag object from a string.
-  constructor(tag: string) {
-    let parts = [], properties = []
-    if (tag.length) for (let pos = 0;;) {
-      let start = pos
-      while (pos < tag.length) {
-        let next = tag.charCodeAt(pos)
-        if (next == 61 || next == 46) break // "=" or "."
-        pos++
-      }
-      if (pos == start) badTag(tag)
-      let name = tag.slice(start, pos)
-      if (tag.charCodeAt(pos) == 61 /* '=' */) {
-        let valStart = ++pos, value
-        if (tag.charCodeAt(pos) == 34 /* '"' */) {
-          for (pos++;;) {
-            if (pos >= tag.length) badTag(tag)
-            let next = tag.charCodeAt(pos++)
-            if (next == 92) pos++
-            else if (next == 34) break
-          }
-          value = JSON.parse(tag.slice(valStart, pos))
-        } else {
-          while (pos < tag.length && tag.charCodeAt(pos) != 46 /* '.' */) pos++
-          value = tag.slice(valStart, pos)
-        }
-        properties.push(name, value)
-      } else {
-        parts.push(name)
-      }
-      if (pos == tag.length) break
-      if (tag.charCodeAt(pos) != 46 /* '.' */) badTag(tag)
-      pos++
-    }
-    this.parts = parts.reverse()
-    this.properties = properties.length ? properties : none
-  }
-
+export class NodeProp<T> {
   /// @internal
-  toString() {
-    let result = ""
-    for (let i = this.parts.length - 1; i >= 0; i--) {
-      if (result) result += "."
-      result += this.parts[i]
-    }
-    for (let i = 0; i < this.properties.length; i += 2) {
-      if (result) result += "."
-      result += this.properties[i]
-      result += "="
-      result += /\W/.test(this.properties[i + 1]) ? JSON.stringify(this.properties[i + 1]) : this.properties[i + 1]
-    }
-    return result
+  id: number
+  fromString: (str: string) => T
+
+  constructor({fromString}: {fromString?: (str: string) => T} = {}) {
+    this.id = nextPropID++
+    this.fromString = fromString || (() => {
+      throw new Error("This node type doesn't define a fromString function")
+    })
   }
 
-  /// See whether `tag`'s parts are a suffix of (or equal to) this
-  /// tag's parts, and whether all the properties in `tag` also occur,
-  /// with the same value, in this this tag.
-  match(tag: Tag) {
-    if (tag.parts.length > this.parts.length || tag.properties.length > this.properties.length)
-      return false
-    for (let i = 0; i < tag.parts.length; i++)
-      if (tag.parts[i] != this.parts[i]) return false
-    return matchProperties(this.properties, tag.properties)
-  }
+  static string() { return new NodeProp<string>({fromString: str => str}) }
+  static bool() { return new NodeProp<boolean>({fromString: () => true}) }
 
-  /// The number of parts and properties present in this tag.
-  get specificity() {
-    return this.parts.length + (this.properties.length >> 1)
-  }
-
-  static none = new Tag("")
+  static document = NodeProp.bool()
+  static repeated = NodeProp.bool()
+  static error = NodeProp.bool()
+  static skipped = NodeProp.bool()
+  static delim = NodeProp.string()
+  static style = NodeProp.string()
+  static lang = NodeProp.string()
 }
 
-const enum TypeFlag { Repeated = 1, Skipped = 2, Error = 4 }
+const repeat = NodeProp.repeated // Need this one a lot later on
 
 export class NodeType {
   /// @internal
   constructor(
-    readonly group: NodeGroup,
-    readonly tag: Tag,
-    private flags: number,
+    readonly name: string,
+    /// @internal
+    readonly props: {[prop: number]: any},
     readonly id: number) {}
 
-  get repeated() { return (this.flags & TypeFlag.Repeated) > 0 }
-  get skipped() { return (this.flags & TypeFlag.Skipped) > 0 }
-  get error() { return (this.flags & TypeFlag.Error) > 0 }
+  prop<T>(prop: NodeProp<T>): T | undefined { return this.props[prop.id] }
 
-  static none: NodeType
+  static none: NodeType = new NodeType("", Object.create(null), 0)
 }
 
-const noFlags = {}
+export type NodeGroupExtension<T> = {
+  prop: NodeProp<T>,
+  compute: (type: NodeType) => T | undefined,
+}
 
 export class NodeGroup {
-  readonly types: NodeType[] = []
-  readonly metadata: {[name: string]: any} = Object.create(null)
+  constructor(readonly types: readonly NodeType[]) {}
 
-  define(tag: Tag, flags: {repeated?: boolean, skipped?: boolean, error?: boolean} = noFlags) {
-    let flagNum = flags == noFlags ? 0 : (flags.repeated ? TypeFlag.Repeated : 0) |
-      (flags.skipped ? TypeFlag.Skipped : 0) | (flags.error ? TypeFlag.Error : 0)
-    let type = new NodeType(this, tag, flagNum, this.types.length)
-    this.types.push(type)
-    return type
+  extend(...extensions: NodeGroupExtension<any>[]): NodeGroup {
+    let newTypes: NodeType[] = []
+    for (let type of this.types) {
+      let newProps = null
+      for (let ext of extensions) {
+        let value = ext.compute(type)
+        if (value !== undefined) {
+          if (!newProps) {
+            newProps = Object.create(null)
+            for (let prop in type.props) newProps[prop] = type.props[prop]
+          }
+          newProps[ext.prop.id] = value
+        }
+      }
+      newTypes.push(newProps ? new NodeType(type.name, newProps, type.id) : type)
+    }
+    return new NodeGroup(newTypes)
   }
 }
-
-const noneGroup = new NodeGroup
-NodeType.none = noneGroup.define(Tag.none)
 
 /// A subtree is a representation of part of the syntax tree. It may
 /// either be the tree root, or a tagged node.
@@ -187,8 +122,8 @@ export abstract class Subtree {
 
   /// The node's type
   abstract type: NodeType
-  // Shorthand for `.type.tag`.
-  get tag() { return this.type.tag }
+  // Shorthand for `.type.name`.
+  get name() { return this.type.name }
   /// The start source offset of this subtree
   abstract start: number
   /// The end source offset
@@ -291,9 +226,8 @@ export class Tree extends Subtree {
 
   /// @internal
   toString(): string {
-    let name = this.tag.toString()
     let children = this.children.map(c => c.toString()).join()
-    return !name ? children : name + (children.length ? "(" + children + ")" : "")
+    return !this.name ? children : this.name + (children.length ? "(" + children + ")" : "")
   }
 
   private partial(start: number, end: number, offset: number, children: (Tree | TreeBuffer)[], positions: number[]) {
@@ -370,7 +304,7 @@ export class Tree extends Subtree {
 
   /// @internal
   iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
-    if (this.type.tag != Tag.none && !iter.doEnter(this.type, offset, offset + this.length))
+    if (this.type.name && !iter.doEnter(this.type, offset, offset + this.length))
       return
 
     if (from <= to) {
@@ -388,7 +322,7 @@ export class Tree extends Subtree {
         child.iterInner(from, to, start, iter)
       }
     }      
-    if (iter.leave && this.type.tag != Tag.none) iter.leave(this.type, offset, offset + this.length)
+    if (iter.leave && this.type.name) iter.leave(this.type, offset, offset + this.length)
     return
   }
 
@@ -422,7 +356,7 @@ export class Tree extends Subtree {
         let child = this.children[select], childStart = this.positions[select] + start
         if (child.length == 0 && childStart == pos) continue
         if (child instanceof Tree) {
-          if (child.type.tag != Tag.none) return new NodeSubtree(child, childStart, parent)
+          if (child.type.name) return new NodeSubtree(child, childStart, parent)
           return child.findChild(pos, side, childStart, parent)
         } else {
           let found = child.findIndex(pos, side, childStart, 0, child.buffer.length)
@@ -455,11 +389,11 @@ export class Tree extends Subtree {
 
   /// Build a tree from a postfix-ordered buffer of node information,
   /// or a cursor over such a buffer.
-  static build(buffer: BufferCursor | readonly number[], topType: NodeType,
+  static build(buffer: BufferCursor | readonly number[], group: NodeGroup, topID: number = 0,
                maxBufferLength: number = DefaultBufferLength,
                reused: Tree[] = []) {
     return buildTree(Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor,
-                     topType, maxBufferLength, reused)
+                     group, topID, maxBufferLength, reused)
   }
 }
 
@@ -485,7 +419,7 @@ export class TreeBuffer {
   /// @internal
   childToString(index: number, parts: string[]): number {
     let id = this.buffer[index], endIndex = this.buffer[index + 3]
-    let result = this.group.types[id].tag.toString()
+    let result = this.group.types[id].name
     index += 4
     if (endIndex > index) {
       let children: string[] = []
@@ -712,8 +646,8 @@ class FlatBufferCursor implements BufferCursor {
 
 const BalanceBranchFactor = 8
 
-function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: number, reused: Tree[]): Tree {
-  let types = topType.group.types
+function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBufferLength: number, reused: Tree[]): Tree {
+  let types = group.types
   function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
     let {id, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
     let startPos = start - parentStart
@@ -726,15 +660,15 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
 
     let type = types[id], node
     if (end - start <= maxBufferLength &&
-        (buffer = findBufferSize(cursor.pos - minPos, type.repeated ? id : -1))) {
+        (buffer = findBufferSize(cursor.pos - minPos, type.prop(repeat) ? id : -1))) {
       // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
         index = copyToBuffer(buffer.start, data, index)
-      node = new TreeBuffer(data, end - buffer.start, type.group)
+      node = new TreeBuffer(data, end - buffer.start, group)
       // Wrap if this is a repeat node
-      if (type.repeated) node = new Tree(type, [node], [0], end - buffer.start)
+      if (type.prop(repeat)) node = new Tree(type, [node], [0], end - buffer.start)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -749,7 +683,7 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
     children.push(node)
     positions.push(startPos)
     // End of a (possible) sequence of repeating nodes—might need to balance
-    if (type.repeated && (cursor.pos == 0 || cursor.id != id))
+    if (type.prop(repeat) && (cursor.pos == 0 || cursor.id != id))
       maybeBalanceSiblings(children, positions, type)
   }
 
@@ -779,12 +713,12 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
       if (nodeSize < 0 || startPos < minPos || fork.start < minStart || id > -1 && fork.id != id) break
-      let localSkipped = types[fork.id].repeated ? 4 : 0
+      let localSkipped = types[fork.id].prop(repeat) ? 4 : 0
       let nodeStart = fork.start
       fork.next()
       while (fork.pos > startPos) {
         if (fork.size < 0) break scan
-        if (types[fork.id].repeated) localSkipped += 4
+        if (types[fork.id].prop(repeat)) localSkipped += 4
         fork.next()
       }
       start = nodeStart
@@ -803,7 +737,7 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
       while (cursor.pos > endPos)
         index = copyToBuffer(bufferStart, buffer, index)
     }
-    if (!types[id].repeated) { // Don't copy repeat nodes into buffers
+    if (!types[id].prop(repeat)) { // Don't copy repeat nodes into buffers
       buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
@@ -815,7 +749,7 @@ function buildTree(cursor: BufferCursor, topType: NodeType, maxBufferLength: num
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions)
   let length = children.length ? positions[0] + children[0].length : 0
-  return new Tree(topType, children.reverse(), positions.reverse(), length)
+  return new Tree(group.types[topID], children.reverse(), positions.reverse(), length)
 }
 
 function balanceRange(type: NodeType,
@@ -865,182 +799,4 @@ function balanceRange(type: NodeType,
     }
   }
   return new Tree(type, localChildren, localPositions, length)
-}
-
-function matchProperties(props: readonly string[], against: readonly string[]) {
-  for (let i = 0; i < against.length; i += 2) {
-    let name = against[i], matched = false
-    for (let j = 0; j < props.length && !matched; j += 2)
-      matched = props[j] == name && props[j + 1] == against[i + 1]
-    if (!matched) return false
-  }
-  return true
-}
-
-const enum ContextType { Descendant, Child, FirstMatching }
-
-class ContextSelector {
-  constructor(readonly tag: Tag, readonly type: ContextType, readonly second: Tag | null = null) {}
-}
-
-class MatchRule<T> {
-  constructor(readonly inner: Tag,
-              readonly context: readonly ContextSelector[],
-              readonly value: T) {}
-}
-
-class MatchTree<T> {
-  constructor(readonly rules: readonly MatchRule<T>[],
-              readonly children: {[part: string]: MatchTree<T>}) {}
-
-  match(tag: Tag, context: readonly Tag[], depth: number, f: (value: T, score: number) => void) {
-    for (let rule of this.rules) {
-      let score = matchProperties(tag.properties, rule.inner.properties) ? matchContext(rule, context) : 0
-      if (score > 0) f(rule.value, rule.inner.specificity * 10000 + score)
-    }
-    if (depth < tag.parts.length) {
-      let next = this.children[tag.parts[depth]]
-      if (next) next.match(tag, context, depth + 1, f)
-    }
-  }
-
-  static build<T>(rules: MatchRule<T>[], depth: number): MatchTree<T> {
-    let local = []
-    let children: {[part: string]: MatchTree<T>} = Object.create(null)
-    for (let rule of rules) {
-      if (rule.inner.parts.length == depth) {
-        local.push(rule)
-      } else {
-        let next = rule.inner.parts[depth]
-        if (children[next]) continue
-        children[next] = MatchTree.build(rules.filter(r => r.inner.parts[depth] == next), depth + 1)
-      }
-    }
-    return new MatchTree(local.length ? local : none,
-                         local.length == rules.length ? noChildren : children)
-  }
-}
-
-export type TagMatchSpec<T> = {readonly [selector: string]: T | TagMatchSpec<T>}
-
-/// A `TagMatch` holds a set of rules matching tags to values (of a
-/// type `T`). It somewhat resembles CSS in structure.
-export class TagMatch<T> {
-  private tree: MatchTree<T>
-
-  /// Create a tag match. `spec` should be an object whose properties
-  /// are selectors and whose values are the values associated with
-  /// those selectors.
-  ///
-  /// Selectors can be:
-  ///
-  /// - A tag (matched via the [`match`](##tree.Tag.match) method)
-  ///
-  /// - Selectors separated by space (descendant selector, which
-  ///   matches the second selector if one of its parents is the
-  ///   first) or a `>` operator (child selector, which only matches
-  ///   if the direct parent matches the first selector).
-  ///
-  /// - A selector preceded by two tags separated by an exclamation
-  ///   point. This is a first-ancestor selector, which matches if the
-  ///   first ancestor that matches the tag _before_ the exclamation
-  ///   point also matches the tag _after_ it. (For example
-  ///   `document!lang=javascript literal` to match only literals
-  ///   whose parent document has `lang=javascript`.)
-  ///
-  /// - Selectors separated by a comma, which makes this rule match
-  ///   any of those selectors.
-  ///
-  /// So for example `{"a.b": 1, "a.c": 2}` maps any tags that match
-  /// `a.b` to the value 1, and any that match `a.c` to 2.
-  ///
-  /// `{"a, b": "Yes", "x > y": "No"}` matches tags that have `a` or
-  /// `b` in them to `"Yes`" and tags that have `y` in them whose
-  /// direct parent has `x` to `"No"`.
-  constructor(readonly spec: TagMatchSpec<T>) {
-    let rules: MatchRule<T>[] = [], token = /([,>!]|(?:"(?:[^"\\]|\\.)+"|[^!"\s>,])+)\s*/g
-    function parseSpec(spec: TagMatchSpec<T>, suffix: string | null) {
-      for (let prop in spec) {
-        let selector = suffix ? prop + suffix : prop
-        if (/^\./.test(selector)) {
-          parseSpec(spec[prop] as TagMatchSpec<T>, selector)
-          continue
-        }
-        let groups: string[][] = [[]], m
-        while (m = token.exec(selector)) {
-          if (m[1] == ",") groups.push([])
-          else groups[groups.length - 1].push(m[1])
-        }
-        let getTag = (str: string) => {
-          if (!str || /^[>!]$/.test(str)) throw new SyntaxError("Invalid selector: " + selector)
-          return new Tag(str)
-        }
-        for (let group of groups) if (group.length) {
-          let inner = getTag(group[group.length - 1]), context = []
-          for (let i = group.length - 2; i >= 0;) {
-            let next = group[i--]
-            if (next == ">") {
-              context.push(new ContextSelector(getTag(group[i--]), ContextType.Child))
-            } else {
-              let tag = getTag(next)
-              if (group[i] == "!") {
-                i--
-                context.push(new ContextSelector(getTag(group[i--]), ContextType.FirstMatching, tag))
-              } else {
-                context.push(new ContextSelector(tag, ContextType.Descendant))
-              }
-            }
-          }
-          rules.push(new MatchRule(inner, context.length ? context : none, spec[prop] as T))
-        }
-      }
-    }
-    parseSpec(spec, null)
-
-    this.tree = MatchTree.build(rules, 0)
-  }
-
-  /// Find the best (most specific) rule that matches `tag`
-  /// (optionally specifying a stack of parent tags in `context`) and
-  /// return its value, or `null` if no rule matches.
-  best(tag: Tag, context: readonly Tag[] = none) {
-    let best = null, bestScore = 0
-    this.tree.match(tag, context, 0, (value, score) => {
-      if (score > bestScore) { best = value; bestScore = score }
-    })
-    return best
-  }
-
-  /// Find _all_ rules that match `tag` (with parent nodes `context`),
-  /// and return their values, sorted by the specificity of the match
-  /// (more specific first).
-  all(tag: Tag, context: readonly Tag[] = none): T[] {
-    let found: T[] = [], scores: number[] = []
-    this.tree.match(tag, context, 0, (value, score) => {
-      let i = 0
-      while (i < scores.length && scores[i] > score) i++
-      found.splice(i, 0, value)
-      scores.splice(i, 0, score)
-    })
-    return found
-  }
-}
-
-function matchContext<T>(rule: MatchRule<T>, context: readonly Tag[]) {
-  if (rule.context.length == 0) return 1
-  let pos = context.length, score = 1
-  outer: for (let cx of rule.context) {
-    for (let j = pos - 1; j >= (cx.type == ContextType.Child ? pos - 1 : 0); j--) if (context[j].match(cx.tag)) {
-      if (cx.type == ContextType.FirstMatching) {
-        if (!context[j].match(cx.second!)) return 0
-        score += 100 + cx.second!.specificity
-      } else {
-        score += 100 + cx.tag.specificity
-      }
-      pos = j
-      continue outer
-    }
-    return 0
-  }
-  return score
 }
