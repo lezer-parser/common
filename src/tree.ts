@@ -59,16 +59,22 @@ export class NodeProp<T> {
     })
   }
 
+  source(f: (type: NodeType) => T | undefined): NodePropSource { return new NodePropSource(this, f) }
+
   static string() { return new NodeProp<string>({fromString: str => str}) }
   static bool() { return new NodeProp<boolean>({fromString: () => true}) }
 
-  static document = NodeProp.bool()
   static repeated = NodeProp.bool()
   static error = NodeProp.bool()
   static skipped = NodeProp.bool()
   static delim = NodeProp.string()
-  static style = NodeProp.string()
+  static style = new NodeProp<number>({fromString: styleFromString})
   static lang = NodeProp.string()
+}
+
+export class NodePropSource {
+  constructor(readonly prop: NodeProp<any>,
+              readonly f: (type: NodeType) => any) {}
 }
 
 const repeat = NodeProp.repeated // Need this one a lot later on
@@ -86,26 +92,21 @@ export class NodeType {
   static none: NodeType = new NodeType("", Object.create(null), 0)
 }
 
-export type NodeGroupExtension<T> = {
-  prop: NodeProp<T>,
-  compute: (type: NodeType) => T | undefined,
-}
-
 export class NodeGroup {
   constructor(readonly types: readonly NodeType[]) {}
 
-  extend(...extensions: NodeGroupExtension<any>[]): NodeGroup {
+  extend(...props: NodePropSource[]): NodeGroup {
     let newTypes: NodeType[] = []
     for (let type of this.types) {
       let newProps = null
-      for (let ext of extensions) {
-        let value = ext.compute(type)
+      for (let source of props) {
+        let value = source.f(type)
         if (value !== undefined) {
           if (!newProps) {
             newProps = Object.create(null)
             for (let prop in type.props) newProps[prop] = type.props[prop]
           }
-          newProps[ext.prop.id] = value
+          newProps[source.prop.id] = value
         }
       }
       newTypes.push(newProps ? new NodeType(type.name, newProps, type.id) : type)
@@ -800,3 +801,43 @@ function balanceRange(type: NodeType,
   }
   return new Tree(type, localChildren, localPositions, length)
 }
+
+const styleNames: {[name: string]: number} = Object.create(null)
+
+function addStyleNames(groups: any[]) {
+  let id = 0
+  for (let group of groups) addGroup("", group)
+  function addGroup(prefix: string, group: any[]) {
+    for (let head of Array.isArray(group[0]) ? group[0] : [group[0]]) {
+      styleNames[prefix + head] = id++
+      for (let i = 1; i < group.length; i++) {
+        let suffix = group[i]
+        if (typeof suffix == "string")
+          styleNames[prefix + head + "." + suffix] = id++
+        else
+          addGroup(prefix + head + ".", suffix)
+      }
+    }
+  }
+}
+
+addStyleNames([
+  ["comment", "line", "block"],
+  ["literal", "regexp", ["string", "special"], ["number", ["integer", "float", "special"]], "character", "escape", "color"],
+  ["invalid", "illegal", "deprecated", "unexpected"],
+  ["keyword", ["expression", "self", "null"], "operator", "unit", "modifier", "control", "define", "special"],
+  ["markup", "content", "underline", "link", "strong", "emphasis", "heading", "list", "quote", "changed", "inserted", "deleted"],
+  ["meta", "declaration", "annotation", "instruction"],
+  ["name", [["variable", "type", "constant", "property", "class", "value", "label", "namespace", "special"], [["define", "builtin"]]]],
+  ["punctuation", "define", "separator", "modifier", "marker"],
+  ["operator", "deref", "arithmetic", "logic", "bitwise", "define", "compare", "update", "control"],
+  ["bracket", [["angle", "square", "paren", "brace", "special"], [["open", "close"]]]]
+])
+
+function styleFromString(name: string): number {
+  let id = styleNames[name]
+  if (id == null) throw new RangeError(`Unsupported style tag: '${name}'`)
+  return id
+}
+
+export const StyleNames = Object.keys(styleNames)
