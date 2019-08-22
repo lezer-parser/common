@@ -50,23 +50,25 @@ let nextPropID = 0
 export class NodeProp<T> {
   /// @internal
   id: number
-  fromString: (str: string) => T
+  deserialize: (str: string) => T
 
-  constructor({fromString}: {fromString?: (str: string) => T} = {}) {
+  constructor({deserialize}: {deserialize?: (str: string) => T} = {}) {
     this.id = nextPropID++
-    this.fromString = fromString || (() => {
-      throw new Error("This node type doesn't define a fromString function")
+    this.deserialize = deserialize || (() => {
+      throw new Error("This node type doesn't define a deserialize function")
     })
   }
 
-  source(f: (type: NodeType) => T | undefined): NodePropSource { return new NodePropSource(this, f) }
+  toString() { return this.id }
 
-  static string() { return new NodeProp<string>({fromString: str => str}) }
-  static bool() { return new NodeProp<boolean>({fromString: () => true}) }
+  add(f: (type: NodeType) => T | undefined): NodePropSource { return new NodePropSource(this, f) }
 
-  static repeated = NodeProp.bool()
-  static error = NodeProp.bool()
-  static skipped = NodeProp.bool()
+  static string() { return new NodeProp<string>({deserialize: str => str}) }
+  static flag() { return new NodeProp<boolean>({deserialize: () => true}) }
+
+  static repeated = NodeProp.flag()
+  static error = NodeProp.flag()
+  static skipped = NodeProp.flag()
   static delim = NodeProp.string()
   static lang = NodeProp.string()
 }
@@ -89,6 +91,13 @@ export class NodeType {
   prop<T>(prop: NodeProp<T>): T | undefined { return this.props[prop.id] }
 
   static none: NodeType = new NodeType("", Object.create(null), 0)
+
+  static match<T>(map: {[selector: string]: T}): (node: NodeType) => T | undefined {
+    let direct = Object.create(null)
+    for (let prop in map)
+      for (let name of prop.split(" ")) direct[name] = map[prop]
+    return (node: NodeType) => direct[node.name]
+  }
 }
 
 export class NodeGroup {
@@ -405,7 +414,6 @@ Tree.prototype.parent = null
 /// children belong to it)
 export class TreeBuffer {
   /// Create a tree buffer
-  // FIXME store a type in here to efficiently represent nodes whose children all fit in a buffer (esp repeat nodes)?
   constructor(readonly buffer: Uint16Array, readonly length: number, readonly group: NodeGroup) {}
 
   /// @internal
