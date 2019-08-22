@@ -68,7 +68,6 @@ export class NodeProp<T> {
   static error = NodeProp.bool()
   static skipped = NodeProp.bool()
   static delim = NodeProp.string()
-  static style = new NodeProp<number>({fromString: styleFromString})
   static lang = NodeProp.string()
 }
 
@@ -228,7 +227,7 @@ export class Tree extends Subtree {
   /// @internal
   toString(): string {
     let children = this.children.map(c => c.toString()).join()
-    return !this.name ? children : this.name + (children.length ? "(" + children + ")" : "")
+    return !this.name ? children : (/\W/.test(this.name) ? JSON.stringify(this.name) : this.name) + (children.length ? "(" + children + ")" : "")
   }
 
   private partial(start: number, end: number, offset: number, children: (Tree | TreeBuffer)[], positions: number[]) {
@@ -421,6 +420,7 @@ export class TreeBuffer {
   childToString(index: number, parts: string[]): number {
     let id = this.buffer[index], endIndex = this.buffer[index + 3]
     let result = this.group.types[id].name
+    if (/\W/.test(result)) result = JSON.stringify(result)
     index += 4
     if (endIndex > index) {
       let children: string[] = []
@@ -801,43 +801,3 @@ function balanceRange(type: NodeType,
   }
   return new Tree(type, localChildren, localPositions, length)
 }
-
-const styleNames: {[name: string]: number} = Object.create(null)
-
-function addStyleNames(groups: any[]) {
-  let id = 0
-  for (let group of groups) addGroup("", group)
-  function addGroup(prefix: string, group: any[]) {
-    for (let head of Array.isArray(group[0]) ? group[0] : [group[0]]) {
-      styleNames[prefix + head] = id++
-      for (let i = 1; i < group.length; i++) {
-        let suffix = group[i]
-        if (typeof suffix == "string")
-          styleNames[prefix + head + "." + suffix] = id++
-        else
-          addGroup(prefix + head + ".", suffix)
-      }
-    }
-  }
-}
-
-addStyleNames([
-  ["comment", "line", "block"],
-  ["literal", "regexp", ["string", "special"], ["number", ["integer", "float", "special"]], "character", "escape", "color"],
-  ["invalid", "illegal", "deprecated", "unexpected"],
-  ["keyword", ["expression", "self", "null"], "operator", "unit", "modifier", "control", "define", "special"],
-  ["markup", "content", "underline", "link", "strong", "emphasis", "heading", "list", "quote", "changed", "inserted", "deleted"],
-  ["meta", "declaration", "annotation", "instruction"],
-  ["name", [["variable", "type", "constant", "property", "class", "value", "label", "namespace", "special"], [["define", "builtin"]]]],
-  ["punctuation", "define", "separator", "modifier", "marker"],
-  ["operator", "deref", "arithmetic", "logic", "bitwise", "define", "compare", "update", "control"],
-  ["bracket", [["angle", "square", "paren", "brace", "special"], [["open", "close"]]]]
-])
-
-function styleFromString(name: string): number {
-  let id = styleNames[name]
-  if (id == null) throw new RangeError(`Unsupported style tag: '${name}'`)
-  return id
-}
-
-export const StyleNames = Object.keys(styleNames)
