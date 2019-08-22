@@ -1,3 +1,15 @@
+## 0.3.0 (2019-08-22)
+
+### New features
+
+Introduces node props.
+
+Node types are now objects holding a name, id, and set of props.
+
+### Breaking changes
+
+Tags are gone again, nodes have plain string names.
+
 ## 0.2.0 (2019-08-02)
 
 ### Bug fixes
