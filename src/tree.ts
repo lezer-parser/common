@@ -47,11 +47,19 @@ class Iteration<T> {
 
 let nextPropID = 0
 
+/// Each [node type](#tree.NodeType) can have metadata associated with
+/// it in props. Instances of this class represent prop names.
 export class NodeProp<T> {
   /// @internal
   id: number
+
+  /// A method that deserializes a value of this prop from a string.
+  /// Can be used to allow a prop to be directly written in a grammar
+  /// file. Defaults to raising an error.
   deserialize: (str: string) => T
 
+  /// Create a new node prop type. You can optionally pass a
+  /// `deserialize` function.
   constructor({deserialize}: {deserialize?: (str: string) => T} = {}) {
     this.id = nextPropID++
     this.deserialize = deserialize || (() => {
@@ -59,39 +67,98 @@ export class NodeProp<T> {
     })
   }
 
-  toString() { return this.id }
-
-  add(f: (type: NodeType) => T | undefined): NodePropSource { return new NodePropSource(this, f) }
-
+  /// Create a string-valued node prop whose deserialize function is
+  /// the identity function.
   static string() { return new NodeProp<string>({deserialize: str => str}) }
+
+  /// Creates a boolean-valued node prop whose deserialize function
+  /// returns true for any input.
   static flag() { return new NodeProp<boolean>({deserialize: () => true}) }
 
-  static repeated = NodeProp.flag()
+  /// Store a value for this prop in the given object. This can be
+  /// useful when building up a prop object to pass to the
+  /// [`NodeType`](#tree.NodeType) constructor. Returns its first
+  /// argument.
+  set(propObj: {[prop: number]: any}, value: T) {
+    propObj[this.id] = value
+    return propObj
+  }
+
+  /// This is meant to be used with
+  /// [`NodeGroup.extend`](#tree.NodeGroup.extend) or
+  /// [`Parser.withProps`](#lezer.Parser.withProps) to compute prop
+  /// values for each node type in the group. Takes a function that
+  /// returns undefined if the node type doesn't get this prop, or the
+  /// prop's value if it does.
+  add(f: (type: NodeType) => T | undefined): NodePropSource { return new NodePropSource(this, f) }
+
+  /// The special node type that the parser uses to represent parse
+  /// errors has this flag set. (You shouldn't use it for custom nodes
+  /// that represent erroneous content.)
   static error = NodeProp.flag()
+
+  /// Nodes that were produced by skipped expressions (such as
+  /// comments) have this prop set to true.
   static skipped = NodeProp.flag()
+
+  /// Prop that is used to describe a rule's delimiters. For example,
+  /// a parenthesized expression node would set this to the string `"(
+  /// )"` (the open and close strings separated by a space). This is
+  /// added by the parser generator's `@detectDelim` feature, but you
+  /// can also manually add them.
   static delim = NodeProp.string()
+
+  /// The top node for a grammar usually has a `lang` prop set to a
+  /// string identifying the grammar, to provide context for the nodes
+  /// inside of it.
   static lang = NodeProp.string()
+
+  /// A prop that indicates whether a node represents a repeated
+  /// expression. Abstractions like [`Subtree`](#tree.Subtree) hide
+  /// such nodes, so you usually won't see them, but if you directly
+  /// rummage through a tree's children, you'll find repeat nodes that
+  /// wrap repeated content into balanced trees.
+  static repeated = NodeProp.flag()
 }
 
+/// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
+/// the way a prop should be added to each node type in a node group.
 export class NodePropSource {
-  constructor(readonly prop: NodeProp<any>,
-              readonly f: (type: NodeType) => any) {}
+  /// @internal
+  constructor(
+    /// @internal
+    readonly prop: NodeProp<any>,
+    /// @internal
+    readonly f: (type: NodeType) => any) {}
 }
 
-const repeat = NodeProp.repeated // Need this one a lot later on
-
+/// Each node in a syntax tree has a node type associated with it.
 export class NodeType {
   /// @internal
   constructor(
+    /// The name of the node type. Not necessarily unique, but if the
+    /// grammar was written properly, different node types with the
+    /// same name within a node group should play the same semantic
+    /// role.
     readonly name: string,
     /// @internal
-    readonly props: {[prop: number]: any},
+    readonly props: {readonly [prop: number]: any},
+    /// The id of this node in its group. Corresponds to the term ids
+    /// used in the parser.
     readonly id: number) {}
 
+  /// Retrieves a node prop for this type. Will return `undefined` if
+  /// the prop isn't present on this node.
   prop<T>(prop: NodeProp<T>): T | undefined { return this.props[prop.id] }
 
+  /// An empty dummy node type to use when no actual type is available.
   static none: NodeType = new NodeType("", Object.create(null), 0)
 
+  /// Create a function from node types to arbitrary values by
+  /// specifying an object whose property names are node names. Often
+  /// useful with [`NodeProp.add`](#tree.NodeProp.add). You can put
+  /// multiple node names, separated by spaces, in a single property
+  /// name to map multiple node names to a single value.
   static match<T>(map: {[selector: string]: T}): (node: NodeType) => T | undefined {
     let direct = Object.create(null)
     for (let prop in map)
@@ -100,9 +167,25 @@ export class NodeType {
   }
 }
 
+/// A node group holds a collection of node types. It is used to
+/// compactly represent trees by storing their type ids, rather than a
+/// full pointer to the type object, in a number array. Each parser
+/// [has](#lezer.Parser.group) a node group, and [tree
+/// buffers](#tree.TreeBuffer) can only store collections of nodes
+/// from the same group. A group can have a maximum of 2**16 (65536)
+/// node types in it, so that the ids fit into 16-bit typed array
+/// slots.
 export class NodeGroup {
-  constructor(readonly types: readonly NodeType[]) {}
+  /// Create a group with the given types. The `id` property of each
+  /// type should correspond to its position within the array.
+  constructor(readonly types: readonly NodeType[]) {
+    for (let i = 0; i < types.length; i++) if (types[i].id != i)
+      throw new RangeError("Node type ids should correspond to array positions when creating a node group")
+  }
 
+  /// Create a copy of this group with some node properties added. The
+  /// arguments to this method should be created with
+  /// [`NodeProp.add`](#tree.NodeProp.add).
   extend(...props: NodePropSource[]): NodeGroup {
     let newTypes: NodeType[] = []
     for (let type of this.types) {
@@ -413,7 +496,7 @@ Tree.prototype.parent = null
 /// before children, with the endIndex of the parent indicating which
 /// children belong to it)
 export class TreeBuffer {
-  /// Create a tree buffer
+  /// Create a tree buffer @internal
   constructor(readonly buffer: Uint16Array, readonly length: number, readonly group: NodeGroup) {}
 
   /// @internal
@@ -626,9 +709,9 @@ class BufferSubtree extends Subtree {
   }
 }
 
-/// This is used by `Tree.build` as an abstraction for iterating over
-/// a tree buffer. You probably won't need it.
-export interface BufferCursor {
+// This is used by `Tree.build` as an abstraction for iterating over
+// a tree buffer.
+interface BufferCursor {
   pos: number
   id: number
   start: number
@@ -654,6 +737,8 @@ class FlatBufferCursor implements BufferCursor {
 }
 
 const BalanceBranchFactor = 8
+
+const repeat = NodeProp.repeated // Need this one a lot later on
 
 function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBufferLength: number, reused: Tree[]): Tree {
   let types = group.types
