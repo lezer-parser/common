@@ -711,7 +711,7 @@ class BufferSubtree extends Subtree {
 
 // This is used by `Tree.build` as an abstraction for iterating over
 // a tree buffer.
-interface BufferCursor {
+export interface BufferCursor {
   pos: number
   id: number
   start: number

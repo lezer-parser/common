@@ -25,3 +25,5 @@
 @TreeBuffer
 
 @DefaultBufferLength
+
+@BufferCursor
