@@ -319,7 +319,9 @@ export class Tree extends Subtree {
   /// @internal
   toString(): string {
     let children = this.children.map(c => c.toString()).join()
-    return !this.name ? children : (/\W/.test(this.name) ? JSON.stringify(this.name) : this.name) + (children.length ? "(" + children + ")" : "")
+    return !this.name ? children :
+      (/\W/.test(this.name) && !this.type.prop(NodeProp.error) ? JSON.stringify(this.name) : this.name) +
+      (children.length ? "(" + children + ")" : "")
   }
 
   private partial(start: number, end: number, offset: number, children: (Tree | TreeBuffer)[], positions: number[]) {
@@ -510,8 +512,8 @@ export class TreeBuffer {
   /// @internal
   childToString(index: number, parts: string[]): number {
     let id = this.buffer[index], endIndex = this.buffer[index + 3]
-    let result = this.group.types[id].name
-    if (/\W/.test(result)) result = JSON.stringify(result)
+    let type = this.group.types[id], result = type.name
+    if (/\W/.test(result) && !type.prop(NodeProp.error)) result = JSON.stringify(result)
     index += 4
     if (endIndex > index) {
       let children: string[] = []
