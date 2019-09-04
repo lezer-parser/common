@@ -264,7 +264,6 @@ export abstract class Subtree {
   /// that end at the position, or `1` to enter nodes that start
   /// there.
   resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
-    // FIXME cache the last result and reuse its upper levels when possible?
     let result = this.resolveAt(pos)
     // FIXME this is slightly inefficient in that it scans the result
     // of resolveAt twice (but further complicating child-finding
@@ -436,8 +435,17 @@ export class Tree extends Subtree {
   }
 
   /// @internal
-  resolveAt(pos: number, side: -1 | 0 | 1 = 0): Subtree {
-    return this.resolveInner(pos, 0, this)
+  resolveAt(pos: number): Subtree {
+    if (cacheRoot == this) {
+      for (let tree = cached;;) {
+        let next = tree.parent
+        if (!next) break
+        if (tree.start < pos && tree.end > pos) return tree.resolve(pos)
+        tree = next
+      }
+    }
+    cacheRoot = this
+    return cached = this.resolveInner(pos, 0, this)
   }
 
   /// @internal
@@ -507,6 +515,12 @@ export class Tree extends Subtree {
 }
 
 Tree.prototype.parent = null
+
+// Top-level `resolveAt` calls store their last result here, so that
+// if the next call is near the last, parent trees can be cheaply
+// reused.
+let cacheRoot: Tree = Tree.empty
+let cached: Subtree = Tree.empty
 
 /// Tree buffers contain (type, start, end, endIndex) quads for each
 /// node. In such a buffer, nodes are stored in prefix order (parents
