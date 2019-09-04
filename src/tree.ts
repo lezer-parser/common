@@ -13,21 +13,35 @@ export interface ChangedRange {
   toB: number
 }
 
-/// Signature of the `enter` function passed to `Subtree.iterate`. It is given
-/// a node's tag, start position, and end position for every node,
-/// and can return...
-///
-///  * `undefined` to proceed iterating as normal.
-///
-///  * `false` to not further iterate this node, but continue
-///    iterating nodes after it.
-///
-///  * Any other value to immediately stop iteration and return the
-///    value from the `iterate` method.
-export type EnterFunc<T> = (type: NodeType, start: number, end: number) => T | false | undefined
+type EnterFunc<T> = (type: NodeType, start: number, end: number) => T | false | undefined
 
-/// Signature of the `leave` function passed to `Subtree.iterate`.
-export type LeaveFunc = (type: NodeType, start: number, end: number) => void
+type LeaveFunc = (type: NodeType, start: number, end: number) => void
+
+///  passed to `Subtree.iterate`.
+type IterateArgs<T> = {
+  /// The function called when entering a node. It is given a node's
+  /// type, start position, and end position, and can return...
+  ///
+  ///  * `undefined` to proceed iterating as normal.
+  ///
+  ///  * `false` to not further iterate this node, but continue
+  ///    iterating nodes after it.
+  ///
+  ///  * Any other value to immediately stop iteration and return that
+  ///    value from the `iterate` method.
+  enter: EnterFunc<T>,
+  /// The function to be called when leaving a node.
+  leave?: LeaveFunc,
+  /// The position in the tree to start iterating. All nodes that
+  /// overlap with this position (including those that start/end
+  /// directly at it) are included in the iteration. Defaults to the
+  /// start of the subtree.
+  from?: number,
+  /// The position in the tree to iterate towards. May be less than
+  /// `from` to perform a reverse iteration. Defaults to the end of
+  /// the subtree.
+  to?: number
+}
 
 class Iteration<T> {
   result: T | undefined = undefined
@@ -239,9 +253,9 @@ export abstract class Subtree {
   abstract toString(): string
 
   /// Iterate over all nodes in this subtree. Will iterate through the
-  /// tree in, calling `enter` for each node it enters and, if given,
-  /// `leave` when it leaves a node.
-  abstract iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc): T | undefined
+  /// tree in, calling `args.enter` for each node it enters and, if
+  /// given, `args.leave` when it leaves a node.
+  abstract iterate<T = any>(args: IterateArgs<T>): T | undefined
 
   /// Find the node at a given position. By default, this will return
   /// the lowest-depth subtree that covers the position from both
@@ -250,6 +264,7 @@ export abstract class Subtree {
   /// that end at the position, or `1` to enter nodes that start
   /// there.
   resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
+    // FIXME cache the last result and reuse its upper levels when possible?
     let result = this.resolveAt(pos)
     // FIXME this is slightly inefficient in that it scans the result
     // of resolveAt twice (but further complicating child-finding
@@ -390,7 +405,7 @@ export class Tree extends Subtree {
   static empty = new Tree(NodeType.none, [], [], 0)
 
   /// @internal
-  iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc) {
+  iterate<T = any>({from = this.start, to = this.end, enter, leave}: IterateArgs<T>) {
     let iter = new Iteration(enter, leave)
     this.iterInner(from, to, 0, iter)
     return iter.result
@@ -658,7 +673,7 @@ class NodeSubtree extends Subtree {
 
   toString() { return this.node.toString() }
 
-  iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc) {
+  iterate<T = any>({from = this.start, to = this.end, enter, leave}: IterateArgs<T>) {
     let iter = new Iteration(enter, leave)
     this.node.iterInner(from, to, this.start, iter)
     return iter.result
@@ -689,7 +704,7 @@ class BufferSubtree extends Subtree {
     return index < 0 ? null : new BufferSubtree(this.buffer, this.bufferStart, index, this)
   }
 
-  iterate<T = any>(from: number, to: number, enter: EnterFunc<T>, leave?: LeaveFunc) {
+  iterate<T = any>({from = this.start, to = this.end, enter, leave}: IterateArgs<T>) {
     let iter = new Iteration(enter, leave)
     if (from <= to)
       this.buffer.iterChild(from, to, this.bufferStart, this.index, iter)
