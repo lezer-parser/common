@@ -1,3 +1,13 @@
+## 0.4.0 (2019-09-10)
+
+### Bug fixes
+
+Export `BufferCursor` again, which was accidentally removed from the exports in 0.3.0.
+
+### Breaking changes
+
+The `iterate` method now takes an object instead of separate parameters.
+
 ## 0.3.0 (2019-08-22)
 
 ### New features
