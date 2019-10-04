@@ -17,7 +17,7 @@ type EnterFunc<T> = (type: NodeType, start: number, end: number) => T | false | 
 
 type LeaveFunc = (type: NodeType, start: number, end: number) => void
 
-///  passed to `Subtree.iterate`.
+/// Passed to `Subtree.iterate`.
 type IterateArgs<T> = {
   /// The function called when entering a node. It is given a node's
   /// type, start position, and end position, and can return...
@@ -740,8 +740,8 @@ class BufferSubtree extends Subtree {
   }
 }
 
-// This is used by `Tree.build` as an abstraction for iterating over
-// a tree buffer.
+/// This is used by `Tree.build` as an abstraction for iterating over
+/// a tree buffer.
 export interface BufferCursor {
   pos: number
   id: number

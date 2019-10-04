@@ -6,10 +6,6 @@
 
 @ChangedRange
 
-@EnterFunc
-
-@LeaveFunc
-
 ### Node types
 
 @NodeType
