@@ -127,6 +127,9 @@ export class NodeProp<T> {
   /// inside of it.
   static lang = NodeProp.string()
 
+  /// Set only on the top node type.
+  static top = NodeProp.flag()
+
   /// A prop that indicates whether a node represents a repeated
   /// expression. Abstractions like [`Subtree`](#tree.Subtree) hide
   /// such nodes, so you usually won't see them, but if you directly
@@ -192,7 +195,10 @@ export class NodeType {
 export class NodeGroup {
   /// Create a group with the given types. The `id` property of each
   /// type should correspond to its position within the array.
-  constructor(readonly types: readonly NodeType[]) {
+  constructor(
+    /// The node types in this group, by id.
+    readonly types: readonly NodeType[]
+  ) {
     for (let i = 0; i < types.length; i++) if (types[i].id != i)
       throw new RangeError("Node type ids should correspond to array positions when creating a node group")
   }
