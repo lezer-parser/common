@@ -1,3 +1,9 @@
+## 0.5.1 (2019-10-22)
+
+### New features
+
+`NodeProp.add` now also allows a selector object to be passed.
+
 ## 0.5.0 (2019-10-22)
 
 ### New features
