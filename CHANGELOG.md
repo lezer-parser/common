@@ -1,3 +1,13 @@
+## 0.5.0 (2019-10-22)
+
+### New features
+
+Adds `NodeProp.top`, which flags a grammar's outer node type.
+
+### Breaking changes
+
+Drops the `NodeProp.lang` prop (superseded by `top`).
+
 ## 0.4.0 (2019-09-10)
 
 ### Bug fixes
