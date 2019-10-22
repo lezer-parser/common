@@ -122,12 +122,7 @@ export class NodeProp<T> {
   /// can also manually add them.
   static delim = NodeProp.string()
 
-  /// The top node for a grammar usually has a `lang` prop set to a
-  /// string identifying the grammar, to provide context for the nodes
-  /// inside of it.
-  static lang = NodeProp.string()
-
-  /// Set only on the top node type.
+  /// Indicates that this node indicates a top level document.
   static top = NodeProp.flag()
 
   /// A prop that indicates whether a node represents a repeated
