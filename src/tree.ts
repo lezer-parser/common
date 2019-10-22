@@ -101,10 +101,13 @@ export class NodeProp<T> {
   /// This is meant to be used with
   /// [`NodeGroup.extend`](#tree.NodeGroup.extend) or
   /// [`Parser.withProps`](#lezer.Parser.withProps) to compute prop
-  /// values for each node type in the group. Takes a function that
-  /// returns undefined if the node type doesn't get this prop, or the
-  /// prop's value if it does.
-  add(f: (type: NodeType) => T | undefined): NodePropSource { return new NodePropSource(this, f) }
+  /// values for each node type in the group. Takes a [match
+  /// object](#tree.NodeType.match) or function that returns undefined
+  /// if the node type doesn't get this prop, and the prop's value if
+  /// it does.
+  add(match: {[selector: string]: T} | ((type: NodeType) => T | undefined)): NodePropSource {
+    return new NodePropSource(this, typeof match == "function" ? match : NodeType.match(match))
+  }
 
   /// The special node type that the parser uses to represent parse
   /// errors has this flag set. (You shouldn't use it for custom nodes
