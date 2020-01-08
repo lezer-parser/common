@@ -9,7 +9,7 @@
   "devDependencies": {
     "ist": "^1.1.1",
     "mocha": "^6.2.0",
-    "typescript": "^3.4.3"
+    "typescript": "^3.7.2"
   },
   "scripts": {
     "watch": "tsc --outDir dist -w -d",
