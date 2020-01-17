@@ -502,7 +502,7 @@ export class Tree extends Subtree {
   /// non-tagged trees.
   balance(maxBufferLength = DefaultBufferLength) {
     return this.children.length <= BalanceBranchFactor ? this :
-      balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0, maxBufferLength)
+      balanceRange(this.type, StrictType.No, this.children, this.positions, 0, this.children.length, 0, maxBufferLength)
   }
 
   /// Build a tree from a postfix-ordered buffer of node information,
@@ -810,17 +810,28 @@ function buildTree(data: BuildData) {
       let endPos = cursor.pos - size
       cursor.next()
       let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
-      while (cursor.pos > endPos)
-        takeNode(start, endPos, localChildren, localPositions)
-      localChildren.reverse(); localPositions.reverse()
-      let balance = null
-      if (id >= minRepeatType && !(id & 1)) { // This is a repeat wrapper node
-        // FIXME wrap some buffers in a tree
-        balance = types[id + 1] // The inner type of this repeat
+      let repeatWrap = id >= minRepeatType && !(id & 1)
+      if (repeatWrap) {
+        while (cursor.pos > endPos) {
+          let isRepeat = cursor.id == id + 1 // This starts with an inner repeated node
+          takeNode(start, endPos, localChildren, localPositions)
+          let last = localChildren[localChildren.length - 1]
+          // Wrap buffers that started with a repeated node in a tree
+          // to allow reuse.
+          if (isRepeat && last instanceof TreeBuffer)
+            localChildren[localChildren.length - 1] = new Tree(types[id + 1], [last], [0], last.length)
+        }
+      } else {
+        while (cursor.pos > endPos)
+          takeNode(start, endPos, localChildren, localPositions)
       }
-      node = balance
-        ? balanceRange(balance, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength)
-        : new Tree(type, localChildren, localPositions, end - start)
+      localChildren.reverse(); localPositions.reverse()
+
+      if (repeatWrap && localChildren.length > BalanceBranchFactor)
+        node = balanceRange(types[id + 1], // The inner type of this repeat
+                            StrictType.Inner, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength)
+      else
+        node = new Tree(type, localChildren, localPositions, end - start)
     }
 
     children.push(node)
@@ -877,7 +888,15 @@ function buildTree(data: BuildData) {
   return new Tree(group.types[topID], children.reverse(), positions.reverse(), length)
 }
 
-function balanceRange(type: NodeType,
+// When strict==Yes, balanced trees only get the given type assigned
+// if at least one of their children has that type. This is necessary
+// to make sure repeat nodes aren't made up out of thin air for
+// skipped content.
+// When it is Inner, the outer call isn't strict, but further
+// recursive calls are.
+const enum StrictType { Yes, No, Inner }
+
+function balanceRange(type: NodeType, strict: StrictType,
                       children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
                       from: number, to: number,
                       start: number, maxBufferLength: number): Tree {
@@ -903,25 +922,28 @@ function balanceRange(type: NodeType,
       }
       if (i == groupFrom + 1) {
         let only = children[groupFrom]
-        if (only instanceof Tree && only.type == type) {
-          // Already wrapped
-          if (only.length > maxChild << 1) { // Too big, collapse
-            for (let j = 0; j < only.children.length; j++) {
-              localChildren.push(only.children[j])
-              localPositions.push(only.positions[j] + groupStart - start)
-            }
-            continue
+        if (only instanceof Tree && only.type == type && only.length > maxChild << 1) { // Too big, collapse
+          for (let j = 0; j < only.children.length; j++) {
+            localChildren.push(only.children[j])
+            localPositions.push(only.positions[j] + groupStart - start)
           }
-        } else {
-          // Wrap with our type to make reuse possible
-          only = new Tree(type, [only], [0], only.length)
+          continue
         }
         localChildren.push(only)
       } else {
-        localChildren.push(balanceRange(type, children, positions, groupFrom, i, groupStart, maxBufferLength))
+        localChildren.push(balanceRange(type, strict == StrictType.Inner ? StrictType.Yes : strict,
+                                        children, positions, groupFrom, i, groupStart, maxBufferLength))
       }
       localPositions.push(groupStart - start)
     }
   }
-  return new Tree(type, localChildren, localPositions, length)
+  let treeType = type
+  if (strict == StrictType.Yes) {
+    treeType = NodeType.none
+    for (let child of localChildren) if (child instanceof Tree && child.type == type) {
+      treeType = type
+      break
+    }
+  }
+  return new Tree(treeType, localChildren, localPositions, length)
 }
