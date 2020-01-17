@@ -797,18 +797,14 @@ function buildTree(data: BuildData) {
       return
     }
 
-    // FIXME add a Term.Repeated test to uses of minRepeatType, as appropriate
     let type = types[id], node
-    if (end - start <= maxBufferLength &&
-        (buffer = findBufferSize(cursor.pos - minPos, type.id >= minRepeatType ? id : -1))) {
+    if (end - start <= maxBufferLength && (buffer = findBufferSize(cursor.pos - minPos))) {
       // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
         index = copyToBuffer(buffer.start, data, index)
       node = new TreeBuffer(data, end - buffer.start, group)
-      // Wrap if this is a repeat node
-      if (type.id >= minRepeatType) node = new Tree(type, [node], [0], end - buffer.start)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -817,32 +813,21 @@ function buildTree(data: BuildData) {
       while (cursor.pos > endPos)
         takeNode(start, endPos, localChildren, localPositions)
       localChildren.reverse(); localPositions.reverse()
-      node = new Tree(type, localChildren, localPositions, end - start)
+      let balance = null
+      if (id >= minRepeatType && !(id & 1)) { // This is a repeat wrapper node
+        // FIXME wrap some buffers in a tree
+        balance = types[id + 1] // The inner type of this repeat
+      }
+      node = balance
+        ? balanceRange(balance, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength)
+        : new Tree(type, localChildren, localPositions, end - start)
     }
 
     children.push(node)
     positions.push(startPos)
-    // End of a (possible) sequence of repeating nodes—might need to balance
-    if (type.id >= minRepeatType && (cursor.pos == 0 || cursor.id != id))
-      maybeBalanceSiblings(children, positions, type)
   }
 
-  function maybeBalanceSiblings(children: (Tree | TreeBuffer)[], positions: number[], type: NodeType) {
-    let to = children.length, from = to - 1
-    for (; from > 0; from--) {
-      let prev = children[from - 1]
-      if (!(prev instanceof Tree) || prev.type != type) break
-    }
-    if (to - from < BalanceBranchFactor) return
-    let start = positions[to - 1]
-    let wrapped = balanceRange(type, children.slice(from, to).reverse(), positions.slice(from, to).reverse(),
-                               0, to - from, start, maxBufferLength)
-    children.length = positions.length = from + 1
-    children[from] = wrapped
-    positions[from] = start
-  }
-
-  function findBufferSize(maxSize: number, id: number) {
+  function findBufferSize(maxSize: number) {
     // Scan through the buffer to find previous siblings that fit
     // together in a TreeBuffer, and don't contain any reused nodes
     // (which can't be stored in a buffer)
@@ -852,7 +837,7 @@ function buildTree(data: BuildData) {
     let size = 0, start = 0, skip = 0, minStart = fork.end - maxBufferLength
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
-      if (nodeSize < 0 || startPos < minPos || fork.start < minStart || id > -1 && fork.id != id) break
+      if (nodeSize < 0 || startPos < minPos || fork.start < minStart) break
       let localSkipped = fork.id >= minRepeatType ? 4 : 0
       let nodeStart = fork.start
       fork.next()
