@@ -85,6 +85,10 @@ export class NodeProp<T> {
   /// the identity function.
   static string() { return new NodeProp<string>({deserialize: str => str}) }
 
+  /// Create a number-valued node prop whose deserialize function is
+  /// just `Number`.
+  static number() { return new NodeProp<number>({deserialize: Number}) }
+
   /// Creates a boolean-valued node prop whose deserialize function
   /// returns true for any input.
   static flag() { return new NodeProp<boolean>({deserialize: () => true}) }
@@ -127,13 +131,6 @@ export class NodeProp<T> {
 
   /// Indicates that this node indicates a top level document.
   static top = NodeProp.flag()
-
-  /// A prop that indicates whether a node represents a repeated
-  /// expression. Abstractions like [`Subtree`](#tree.Subtree) hide
-  /// such nodes, so you usually won't see them, but if you directly
-  /// rummage through a tree's children, you'll find repeat nodes that
-  /// wrap repeated content into balanced trees.
-  static repeated = NodeProp.flag()
 }
 
 /// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
@@ -510,15 +507,28 @@ export class Tree extends Subtree {
 
   /// Build a tree from a postfix-ordered buffer of node information,
   /// or a cursor over such a buffer.
-  static build(buffer: BufferCursor | readonly number[], group: NodeGroup, topID: number = 0,
-               maxBufferLength: number = DefaultBufferLength,
-               reused: Tree[] = []) {
-    return buildTree(Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor,
-                     group, topID, maxBufferLength, reused)
-  }
+  static build(data: BuildData) { return buildTree(data) }
 }
 
 Tree.prototype.parent = null
+
+/// Options passed to [`Tree.build`](#tree.Tree^build).
+export type BuildData = {
+  /// The buffer or buffer cursor to read the node data from.
+  buffer: BufferCursor | readonly number[],
+  /// The node types to use.
+  group: NodeGroup,
+  /// The id of the top node type, if any.
+  topID?: number,
+  /// The maximum buffer length to use. Defaults to
+  /// [`DefaultBufferLength`](#tree.DefaultBufferLength).
+  maxBufferLength?: number,
+  /// An optional set of reused nodes that the buffer can refer to.
+  reused?: Tree[],
+  /// The first node type that indicates repeat constructs in this
+  /// grammar.
+  minRepeatType?: number
+}
 
 // Top-level `resolveAt` calls store their last result here, so that
 // if the next call is near the last, parent trees can be cheaply
@@ -773,9 +783,9 @@ class FlatBufferCursor implements BufferCursor {
 
 const BalanceBranchFactor = 8
 
-const repeat = NodeProp.repeated // Need this one a lot later on
-
-function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBufferLength: number, reused: Tree[]): Tree {
+function buildTree(data: BuildData) {
+  let {buffer, group, topID = 0, maxBufferLength = DefaultBufferLength, reused = [], minRepeatType = 1e9} = data
+  let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = group.types
   function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
     let {id, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
@@ -787,9 +797,10 @@ function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBuf
       return
     }
 
+    // FIXME add a Term.Repeated test to uses of minRepeatType, as appropriate
     let type = types[id], node
     if (end - start <= maxBufferLength &&
-        (buffer = findBufferSize(cursor.pos - minPos, type.prop(repeat) ? id : -1))) {
+        (buffer = findBufferSize(cursor.pos - minPos, type.id >= minRepeatType ? id : -1))) {
       // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
@@ -797,7 +808,7 @@ function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBuf
         index = copyToBuffer(buffer.start, data, index)
       node = new TreeBuffer(data, end - buffer.start, group)
       // Wrap if this is a repeat node
-      if (type.prop(repeat)) node = new Tree(type, [node], [0], end - buffer.start)
+      if (type.id >= minRepeatType) node = new Tree(type, [node], [0], end - buffer.start)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -812,7 +823,7 @@ function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBuf
     children.push(node)
     positions.push(startPos)
     // End of a (possible) sequence of repeating nodes—might need to balance
-    if (type.prop(repeat) && (cursor.pos == 0 || cursor.id != id))
+    if (type.id >= minRepeatType && (cursor.pos == 0 || cursor.id != id))
       maybeBalanceSiblings(children, positions, type)
   }
 
@@ -842,12 +853,12 @@ function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBuf
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
       if (nodeSize < 0 || startPos < minPos || fork.start < minStart || id > -1 && fork.id != id) break
-      let localSkipped = types[fork.id].prop(repeat) ? 4 : 0
+      let localSkipped = fork.id >= minRepeatType ? 4 : 0
       let nodeStart = fork.start
       fork.next()
       while (fork.pos > startPos) {
         if (fork.size < 0) break scan
-        if (types[fork.id].prop(repeat)) localSkipped += 4
+        if (fork.id >= minRepeatType) localSkipped += 4
         fork.next()
       }
       start = nodeStart
@@ -866,7 +877,7 @@ function buildTree(cursor: BufferCursor, group: NodeGroup, topID: number, maxBuf
       while (cursor.pos > endPos)
         index = copyToBuffer(bufferStart, buffer, index)
     }
-    if (!types[id].prop(repeat)) { // Don't copy repeat nodes into buffers
+    if (id < minRepeatType) { // Don't copy repeat nodes into buffers
       buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
