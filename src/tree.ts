@@ -323,6 +323,7 @@ export class Tree extends Subtree {
     readonly length: number
   ) {
     super()
+    if (!type) throw new Error("NOTYPE")
   }
 
   /// @internal
@@ -810,16 +811,19 @@ function buildTree(data: BuildData) {
       let endPos = cursor.pos - size
       cursor.next()
       let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
-      let repeatWrap = id >= minRepeatType && !(id & 1)
-      if (repeatWrap) {
+      // Check if this is a repeat wrapper. Store the id of the inner
+      // repeat node in the variable if it is
+      let repeating = id >= group.types.length ? id - (group.types.length - minRepeatType) : -1
+      if (repeating > -1) {
+        type = types[repeating]
         while (cursor.pos > endPos) {
-          let isRepeat = cursor.id == id + 1 // This starts with an inner repeated node
+          let isRepeat = cursor.id == repeating // This starts with an inner repeated node
           takeNode(start, endPos, localChildren, localPositions)
           let last = localChildren[localChildren.length - 1]
           // Wrap buffers that started with a repeated node in a tree
           // to allow reuse.
           if (isRepeat && last instanceof TreeBuffer)
-            localChildren[localChildren.length - 1] = new Tree(types[id + 1], [last], [0], last.length)
+            localChildren[localChildren.length - 1] = new Tree(type, [last], [0], last.length)
         }
       } else {
         while (cursor.pos > endPos)
@@ -827,9 +831,9 @@ function buildTree(data: BuildData) {
       }
       localChildren.reverse(); localPositions.reverse()
 
-      if (repeatWrap && localChildren.length > BalanceBranchFactor)
-        node = balanceRange(types[id + 1], // The inner type of this repeat
-                            StrictType.Inner, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength)
+      if (repeating > -1 && localChildren.length > BalanceBranchFactor)
+        node = balanceRange(type, StrictType.Inner, localChildren, localPositions,
+                            0, localChildren.length, 0, maxBufferLength)
       else
         node = new Tree(type, localChildren, localPositions, end - start)
     }
