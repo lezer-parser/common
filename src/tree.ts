@@ -524,7 +524,7 @@ export type BuildData = {
   /// [`DefaultBufferLength`](#tree.DefaultBufferLength).
   maxBufferLength?: number,
   /// An optional set of reused nodes that the buffer can refer to.
-  reused?: Tree[],
+  reused?: (Tree | TreeBuffer)[],
   /// The first node type that indicates repeat constructs in this
   /// grammar.
   minRepeatType?: number
@@ -542,7 +542,17 @@ let cached: Subtree = Tree.empty
 /// children belong to it)
 export class TreeBuffer {
   /// Create a tree buffer @internal
-  constructor(readonly buffer: Uint16Array, readonly length: number, readonly group: NodeGroup) {}
+  constructor(
+    /// @internal
+    readonly buffer: Uint16Array,
+    // The total length of the group of nodes in the buffer.
+    readonly length: number,
+    /// @internal
+    readonly group: NodeGroup,
+    /// An optional type tag, used to tag a buffer as being part of a
+    /// repetition @internal
+    readonly type = NodeType.none
+  ) {}
 
   /// @internal
   toString() {
@@ -796,7 +806,8 @@ function buildTree(data: BuildData) {
        minRepeatType = group.types.length} = data as BuildData
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = group.types
-  function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
+  function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[],
+                    tagBuffer: NodeType) {
     let {id, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
     let startPos = start - parentStart
     if (size < 0) { // Reused node
@@ -813,7 +824,7 @@ function buildTree(data: BuildData) {
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
         index = copyToBuffer(buffer.start, data, index)
-      node = new TreeBuffer(data, end - buffer.start, group)
+      node = new TreeBuffer(data, end - buffer.start, group, tagBuffer)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -826,16 +837,11 @@ function buildTree(data: BuildData) {
         type = types[repeating]
         while (cursor.pos > endPos) {
           let isRepeat = cursor.id == repeating // This starts with an inner repeated node
-          takeNode(start, endPos, localChildren, localPositions)
-          let last = localChildren[localChildren.length - 1]
-          // Wrap buffers that started with a repeated node in a tree
-          // to allow reuse.
-          if (isRepeat && last instanceof TreeBuffer)
-            localChildren[localChildren.length - 1] = new Tree(type, [last], [0], last.length)
+          takeNode(start, endPos, localChildren, localPositions, isRepeat ? type : NodeType.none)
         }
       } else {
         while (cursor.pos > endPos)
-          takeNode(start, endPos, localChildren, localPositions)
+          takeNode(start, endPos, localChildren, localPositions, NodeType.none)
       }
       localChildren.reverse(); localPositions.reverse()
 
@@ -894,7 +900,7 @@ function buildTree(data: BuildData) {
   }
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
-  while (cursor.pos > 0) takeNode(0, 0, children, positions)
+  while (cursor.pos > 0) takeNode(0, 0, children, positions, NodeType.none)
   let length = children.length ? positions[0] + children[0].length : 0
   return new Tree(group.types[topID], children.reverse(), positions.reverse(), length)
 }
@@ -944,6 +950,6 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
 }
 
 function containsType(nodes: readonly (Tree | TreeBuffer)[], type: NodeType) {
-  for (let elt of nodes) if (elt instanceof Tree && elt.type == type) return true
+  for (let elt of nodes) if (elt.type == type) return true
   return false
 }
