@@ -581,6 +581,12 @@ export class TreeBuffer {
     return new TreeBuffer(newBuffer, Math.min(at, this.length), this.group)
   }
 
+  iterate<T = any>({from = 0, to = this.length, enter, leave}: IterateArgs<T>): T | undefined {
+    let iter = new Iteration(enter, leave)
+    this.iterInner(from, to, 0, iter)
+    return iter.result
+  }
+
   /// @internal
   iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
     if (from <= to) {
