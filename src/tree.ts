@@ -785,7 +785,10 @@ class FlatBufferCursor implements BufferCursor {
 const BalanceBranchFactor = 8
 
 function buildTree(data: BuildData) {
-  let {buffer, group, topID = 0, maxBufferLength = DefaultBufferLength, reused = [], minRepeatType = 1e9} = data
+  let {buffer, group, topID = 0,
+       maxBufferLength = DefaultBufferLength,
+       reused = [],
+       minRepeatType = group.types.length} = data as BuildData
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = group.types
   function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[]) {
