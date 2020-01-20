@@ -1,3 +1,21 @@
+## 0.7.0 (2020-01-20)
+
+### Bug fixes
+
+Fix a bug that prevented balancing of repeat nodes when there were skipped nodes present between the repeated elements (which ruined the efficiency of incremental parses).
+
+### New features
+
+`TreeBuffer` objects now have an `iterate` function.
+
+Buffers can optionally be tagged with an (unnamed) node type to allow reusing them in an incremental parse without wrapping them in a tree.
+
+### Breaking changes
+
+`Tree.build` now takes its arguments wrapped in an object. It also expects the buffer content to conform to from lezer 0.7.0's representation of repeated productions.
+
+The `repeated` node prop was removed (the parser generator now encodes repetition in the type ids).
+
 ## 0.5.1 (2019-10-22)
 
 ### New features
