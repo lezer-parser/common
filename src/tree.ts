@@ -365,14 +365,17 @@ export class Tree extends Subtree {
     let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
 
     function cutAt(tree: Tree, pos: number, side: -1 | 1) {
-      let sub = tree.resolve(pos)
-      for (let cur = pos;;) {
-        let sibling = side < 0 ? sub.childBefore(cur) : sub.childAfter(cur)
-        if (sibling) return side < 0 ? sibling.end - 1 : sibling.start + 1
-        if (!sub.parent) return side < 0 ? 0 : 1e9
-        cur = side < 0 ? sub.start : sub.end
-        sub = sub.parent!
-      }
+      let found = -1
+      tree.iterate({
+        from: pos,
+        to: side < 0 ? 0 : tree.length,
+        enter() { return found < 0 ? undefined : false },
+        leave(type, start, end) {
+          if (found < 0 && !type.prop(NodeProp.error))
+            found = side < 0 ? Math.min(pos, end - 1) : Math.max(pos, start + 1)
+        }
+      })
+      return found > -1 ? found : side < 0 ? 0 : tree.length
     }
 
     let off = 0
