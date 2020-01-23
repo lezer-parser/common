@@ -1,3 +1,10 @@
+## 0.7.1 (2020-01-23)
+
+### Bug fixes
+
+In `applyChanges`, make sure the tree is collapsed all the way to the
+nearest non-error node next to the change.
+
 ## 0.7.0 (2020-01-20)
 
 ### Bug fixes
