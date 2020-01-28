@@ -11,6 +11,10 @@
     "mocha": "^6.2.0",
     "typescript": "^3.7.2"
   },
+  "repository": {
+    "type" : "git",
+    "url" : "https://github.com/lezer-parser/lezer-tree.git"
+  },
   "scripts": {
     "watch": "tsc --outDir dist -w -d",
     "prepare": "tsc --outDir dist -d",
