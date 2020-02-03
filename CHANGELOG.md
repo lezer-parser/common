@@ -1,3 +1,9 @@
+## 0.8.0 (2020-02-03)
+
+### New features
+
+Bump version along with the rest of the lezer packages.
+
 ## 0.7.1 (2020-01-23)
 
 ### Bug fixes

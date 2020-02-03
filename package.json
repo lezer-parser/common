@@ -1,6 +1,6 @@
 {
   "name": "lezer-tree",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Syntax tree data structure for the lezer parser",
   "main": "dist/tree.js",
   "types": "dist/tree.d.ts",
