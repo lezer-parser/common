@@ -1,3 +1,9 @@
+## 0.8.1 (2020-02-14)
+
+### Bug fixes
+
+Fix bug that would cause tree balancing of deep trees to produce corrupt output.
+
 ## 0.8.0 (2020-02-03)
 
 ### New features
