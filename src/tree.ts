@@ -941,7 +941,7 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
         localChildren.push(children[groupFrom])
       } else {
         let inner = balanceRange(innerType, innerType, children, positions, groupFrom, i, groupStart,
-                                 maxBufferLength, positions[i - 1] - groupStart)
+                                 maxBufferLength, positions[i - 1] + children[i - 1].length - groupStart)
         if (innerType != NodeType.none && !containsType(inner.children, innerType))
           inner = new Tree(NodeType.none, inner.children, inner.positions, inner.length)
         localChildren.push(inner)
