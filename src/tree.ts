@@ -371,7 +371,7 @@ export class Tree extends Subtree {
         to: side < 0 ? 0 : tree.length,
         enter() { return found < 0 ? undefined : false },
         leave(type, start, end) {
-          if (found < 0 && !type.prop(NodeProp.error))
+          if (found < 0 && (side < 0 ? end <= pos : start >= pos) && !type.prop(NodeProp.error))
             found = side < 0 ? Math.min(pos, end - 1) : Math.max(pos, start + 1)
         }
       })
