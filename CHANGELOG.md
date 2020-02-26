@@ -1,3 +1,9 @@
+## 0.8.2 (2020-02-26)
+
+### Bug fixes
+
+Fix a bug that caused `applyChanges` to include parts of the old tree that weren't safe to reuse.
+
 ## 0.8.1 (2020-02-14)
 
 ### Bug fixes
