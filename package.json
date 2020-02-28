@@ -3,6 +3,7 @@
   "version": "0.8.2",
   "description": "Syntax tree data structure for the lezer parser",
   "main": "dist/tree.js",
+  "module": "dist/tree.es.js",
   "types": "dist/tree.d.ts",
   "author": "Marijn Haverbeke <marijnh@gmail.com>",
   "license": "MIT",
@@ -17,7 +18,9 @@
   },
   "scripts": {
     "watch": "tsc --outDir dist -w -d",
-    "prepare": "tsc --outDir dist -d",
+    "build:cjs": "tsc --outDir dist -d",
+    "build:es": "tsc src/tree.ts --outDir . -m es2015 -t es2015 && mv tree.js dist/tree.es.js",
+    "prepare": "npm run build:cjs && npm run build:es",
     "test": "mocha test/test-*.js"
   }
 }
