@@ -2,7 +2,12 @@
   "name": "lezer-tree",
   "version": "0.8.3",
   "description": "Syntax tree data structure for the lezer parser",
-  "main": "dist/tree.js",
+  "main": "dist/tree.cjs",
+  "type": "module",
+  "exports": {
+    "import": "./dist/tree.es.js",
+    "require": "./dist/tree.cjs"
+  },
   "module": "dist/tree.es.js",
   "types": "dist/tree.d.ts",
   "author": "Marijn Haverbeke <marijnh@gmail.com>",
@@ -18,7 +23,7 @@
   },
   "scripts": {
     "watch": "tsc --outDir dist -w -d",
-    "build:cjs": "tsc --outDir dist -d",
+    "build:cjs": "tsc --outDir dist -d && mv dist/tree.js dist/tree.cjs",
     "build:es": "tsc src/tree.ts --outDir . -m es2015 -t es2015 && mv tree.js dist/tree.es.js",
     "prepare": "npm run build:cjs && npm run build:es",
     "test": "mocha test/test-*.js"
