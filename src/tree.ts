@@ -509,7 +509,7 @@ export class Tree extends Subtree {
   }
 
   /// Build a tree from a postfix-ordered buffer of node information,
-  /// or a cursor over such a buffer.
+  /// or a cursor over such a buffer. 
   static build(data: BuildData) { return buildTree(data) }
 }
 
@@ -518,6 +518,25 @@ Tree.prototype.parent = null
 /// Options passed to [`Tree.build`](#tree.Tree^build).
 export type BuildData = {
   /// The buffer or buffer cursor to read the node data from.
+  ///
+  /// When this is an array, it should contain four values for every
+  /// node in the tree.
+  ///
+  ///  - The first holds the node's type, as a node ID pointing into
+  ///    the given `NodeGroup`.
+  ///  - The second holds the node's start offset.
+  ///  - The third the end offset.
+  ///  - The fourth the amount of space taken up in the array by this
+  ///    node and its children. Since there's four values per node,
+  ///    this is the total number of nodes inside this node (children
+  ///    and transitive children) plus one for the node itself, times
+  ///    four.
+  ///
+  /// Parent nodes should appear _after_ child nodes in the array. As
+  /// an example, a node of type 10 spanning positions 0 to 4, with
+  /// two children, of type 11 and 12, might look like this:
+  ///
+  ///     [11, 0, 1, 4, 12, 2, 4, 4, 10, 0, 4, 12]
   buffer: BufferCursor | readonly number[],
   /// The node types to use.
   group: NodeGroup,
@@ -774,14 +793,25 @@ class BufferSubtree extends Subtree {
 }
 
 /// This is used by `Tree.build` as an abstraction for iterating over
-/// a tree buffer.
+/// a tree buffer. A cursor initially points at the very last element
+/// in the buffer. Every time `next()` is called it moves on to the
+/// previous one.
 export interface BufferCursor {
+  /// The current buffer position (four times the number of nodes
+  /// remaining).
   pos: number
+  /// The node ID of the next node in the buffer.
   id: number
+  /// The start position of the next node in the buffer.
   start: number
+  /// The end position of the next node.
   end: number
+  /// The size of the next node (the number of nodes inside, counting
+  /// the node itself, times 4).
   size: number
+  /// Moves `this.pos` down by 4.
   next(): void
+  /// Create a copy of this cursor.
   fork(): BufferCursor
 }
 
