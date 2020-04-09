@@ -14,7 +14,6 @@
   "license": "MIT",
   "devDependencies": {
     "ist": "^1.1.1",
-    "mocha": "^6.2.0",
     "typescript": "^3.7.2"
   },
   "repository": {
@@ -25,7 +24,6 @@
     "watch": "tsc --outDir dist -w -d",
     "build:cjs": "tsc --outDir dist -d && mv dist/tree.js dist/tree.cjs",
     "build:es": "tsc src/tree.ts --outDir . -m es2015 -t es2015 && mv tree.js dist/tree.es.js",
-    "prepare": "npm run build:cjs && npm run build:es",
-    "test": "mocha test/test-*.js"
+    "prepare": "npm run build:cjs && npm run build:es"
   }
 }
