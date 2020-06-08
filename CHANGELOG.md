@@ -1,3 +1,9 @@
+## 0.9.0 (2020-06-08)
+
+### Breaking changes
+
+Drop `NodeProp.delim` in favor of `NodeProp.openedBy`/`closedBy`.
+
 ## 0.8.4 (2020-04-01)
 
 ### Bug fixes
