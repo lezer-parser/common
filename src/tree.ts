@@ -122,12 +122,16 @@ export class NodeProp<T> {
   /// comments) have this prop set to true.
   static skipped = NodeProp.flag()
 
-  /// Prop that is used to describe a rule's delimiters. For example,
-  /// a parenthesized expression node would set this to the string `"(
-  /// )"` (the open and close strings separated by a space). This is
-  /// added by the parser generator's `@detectDelim` feature, but you
-  /// can also manually add them.
-  static delim = NodeProp.string()
+  /// Prop that is used to describe matching delimiters. For opening
+  /// delimiters, this holds an array of node names (written as a
+  /// space-separated string when declaring this prop in a grammar)
+  /// for the node types of closing delimiters that match it.
+  static closedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
+
+  /// The inverse of [`openedBy`](#tree.NodeProp^closedBy). This is
+  /// attached to closing delimiters, holding an array of node names
+  /// of types of matching opening delimiters.
+  static openedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
 
   /// Indicates that this node indicates a top level document.
   static top = NodeProp.flag()
