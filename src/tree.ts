@@ -106,7 +106,7 @@ export class NodeProp<T> {
   /// [`NodeGroup.extend`](#tree.NodeGroup.extend) or
   /// [`Parser.withProps`](#lezer.Parser.withProps) to compute prop
   /// values for each node type in the group. Takes a [match
-  /// object](#tree.NodeType.match) or function that returns undefined
+  /// object](#tree.NodeType^match) or function that returns undefined
   /// if the node type doesn't get this prop, and the prop's value if
   /// it does.
   add(match: {[selector: string]: T} | ((type: NodeType) => T | undefined)): NodePropSource {
