@@ -309,12 +309,11 @@ export abstract class Subtree {
 /// part of this data structure, and can be used (through `resolve`,
 /// for example) to zoom in on any single node.
 export class Tree extends Subtree {
-  /// @internal
   parent!: null
 
-  /// @internal
+  /// Construct a new tree. You usually want to go through
+  /// [`Tree.build`](#tree.Tree^build) instead.
   constructor(
-    /// @internal
     readonly type: NodeType,
     /// The tree's child nodes. Children small enough to fit in a
     /// `TreeBuffer` will be represented as such, other children can be
@@ -323,16 +322,14 @@ export class Tree extends Subtree {
     /// The positions (offsets relative to the start of this tree) of
     /// the children.
     readonly positions: readonly number[],
-    /// The total length of this tree @internal
+    /// The total length of this tree
     readonly length: number
   ) {
     super()
   }
 
-  /// @internal
   get start() { return 0 }
 
-  /// @internal
   get end() { return this.length }
 
   /// @internal
@@ -411,7 +408,6 @@ export class Tree extends Subtree {
   /// The empty tree
   static empty = new Tree(NodeType.none, [], [], 0)
 
-  /// @internal
   iterate<T = any>({from = this.start, to = this.end, enter, leave}: IterateArgs<T>) {
     let iter = new Iteration(enter, leave)
     this.iterInner(from, to, 0, iter)
@@ -456,12 +452,10 @@ export class Tree extends Subtree {
     return cached = this.resolveInner(pos, 0, this)
   }
 
-  /// @internal
   childBefore(pos: number): Subtree | null {
     return this.findChild(pos, -1, 0, this)
   }
 
-  /// @internal
   childAfter(pos: number): Subtree | null {
     return this.findChild(pos, 1, 0, this)
   }
@@ -575,8 +569,6 @@ export class TreeBuffer {
     readonly length: number,
     /// @internal
     readonly group: NodeGroup,
-    /// An optional type tag, used to tag a buffer as being part of a
-    /// repetition @internal
     readonly type = NodeType.none
   ) {}
 

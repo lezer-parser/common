@@ -6,7 +6,8 @@
     "sourceMap": true,
     "strict": true,
     "target": "es5",
-    "newLine": "lf"
+    "newLine": "lf",
+    "stripInternal": true
   },
   "include": ["src/*.ts"]
 }
