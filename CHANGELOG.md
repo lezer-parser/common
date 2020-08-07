@@ -1,3 +1,9 @@
+## 0.10.0 (2020-08-07)
+
+### Breaking changes
+
+No longer list internal properties in the type definitions.
+
 ## 0.9.0 (2020-06-08)
 
 ### Breaking changes
