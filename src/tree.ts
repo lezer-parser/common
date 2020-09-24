@@ -835,9 +835,12 @@ function buildTree(data: BuildData) {
        minRepeatType = group.types.length} = data as BuildData
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = group.types
-  function takeNode(parentStart: number, minPos: number, children: (Tree | TreeBuffer)[], positions: number[],
-                    tagBuffer: NodeType) {
-    let {id, start, end, size} = cursor, buffer!: {size: number, start: number, skip: number} | null
+  function takeNode(parentStart: number, minPos: number,
+                    children: (Tree | TreeBuffer)[], positions: number[],
+                    inRepeat: number) {
+    let {id, start, end, size} = cursor
+    while (id == inRepeat) { cursor.next(); ({id, start, end, size} = cursor) }
+
     let startPos = start - parentStart
     if (size < 0) { // Reused node
       children.push(reused[id])
@@ -846,35 +849,25 @@ function buildTree(data: BuildData) {
       return
     }
 
-    let type = types[id], node
-    if (end - start <= maxBufferLength && (buffer = findBufferSize(cursor.pos - minPos))) {
+    let type = types[id], node, buffer: {size: number, start: number, skip: number} | undefined
+    if (end - start <= maxBufferLength && (buffer = findBufferSize(cursor.pos - minPos, inRepeat))) {
       // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
-        index = copyToBuffer(buffer.start, data, index)
-      node = new TreeBuffer(data, end - buffer.start, group, tagBuffer)
+        index = copyToBuffer(buffer.start, data, index, inRepeat)
+      node = new TreeBuffer(data, end - buffer.start, group, inRepeat < 0 ? NodeType.none : types[inRepeat])
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
       cursor.next()
       let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
-      // Check if this is a repeat wrapper. Store the id of the inner
-      // repeat node in the variable if it is
-      let repeating = id >= group.types.length ? id - (group.types.length - minRepeatType) : -1
-      if (repeating > -1) {
-        type = types[repeating]
-        while (cursor.pos > endPos) {
-          let isRepeat = cursor.id == repeating // This starts with an inner repeated node
-          takeNode(start, endPos, localChildren, localPositions, isRepeat ? type : NodeType.none)
-        }
-      } else {
-        while (cursor.pos > endPos)
-          takeNode(start, endPos, localChildren, localPositions, NodeType.none)
-      }
+      let localInRepeat = id >= minRepeatType ? id : -1
+      while (cursor.pos > endPos)
+        takeNode(start, endPos, localChildren, localPositions, localInRepeat)
       localChildren.reverse(); localPositions.reverse()
 
-      if (repeating > -1 && localChildren.length > BalanceBranchFactor)
+      if (localInRepeat > -1 && localChildren.length > BalanceBranchFactor)
         node = balanceRange(type, type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength, end - start)
       else
         node = new Tree(type, localChildren, localPositions, end - start)
@@ -884,15 +877,26 @@ function buildTree(data: BuildData) {
     positions.push(startPos)
   }
 
-  function findBufferSize(maxSize: number) {
+  function findBufferSize(maxSize: number, inRepeat: number) {
     // Scan through the buffer to find previous siblings that fit
     // together in a TreeBuffer, and don't contain any reused nodes
-    // (which can't be stored in a buffer)
-    // If `type` is > -1, only include siblings with that same type
-    // (used to group repeat content into a buffer)
+    // (which can't be stored in a buffer).
+    // If `inRepeat` is > -1, ignore node boundaries of that type for
+    // nesting, but make sure the end falls either at the start
+    // (`maxSize`) or before such a node.
     let fork = cursor.fork()
     let size = 0, start = 0, skip = 0, minStart = fork.end - maxBufferLength
+    let result = {size: 0, start: 0, skip: 0}
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
+      // Pretend nested repeat nodes of the same type don't exist
+      if (fork.id == inRepeat) {
+        // Except that we store the current state as a valid return
+        // value.
+        result.size = size; result.start = start; result.skip = skip
+        skip += 4; size += 4
+        fork.next()
+        continue
+      }
       let nodeSize = fork.size, startPos = fork.pos - nodeSize
       if (nodeSize < 0 || startPos < minPos || fork.start < minStart) break
       let localSkipped = fork.id >= minRepeatType ? 4 : 0
@@ -907,17 +911,21 @@ function buildTree(data: BuildData) {
       size += nodeSize
       skip += localSkipped
     }
-    return size > 4 ? {size, start, skip} : null
+    if (inRepeat < 0 || size == maxSize) {
+      result.size = size; result.start = start; result.skip = skip
+    }
+    return result.size > 4 ? result : undefined
   }
 
-  function copyToBuffer(bufferStart: number, buffer: Uint16Array, index: number): number {
+  function copyToBuffer(bufferStart: number, buffer: Uint16Array, index: number, inRepeat: number): number {
     let {id, start, end, size} = cursor
     cursor.next()
+    if (id == inRepeat) return index
     let startIndex = index
     if (size > 4) {
       let endPos = cursor.pos - (size - 4)
       while (cursor.pos > endPos)
-        index = copyToBuffer(bufferStart, buffer, index)
+        index = copyToBuffer(bufferStart, buffer, index, inRepeat)
     }
     if (id < minRepeatType) { // Don't copy repeat nodes into buffers
       buffer[--index] = startIndex
@@ -929,7 +937,7 @@ function buildTree(data: BuildData) {
   }
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
-  while (cursor.pos > 0) takeNode(0, 0, children, positions, NodeType.none)
+  while (cursor.pos > 0) takeNode(0, 0, children, positions, -1)
   let length = children.length ? positions[0] + children[0].length : 0
   return new Tree(group.types[topID], children.reverse(), positions.reverse(), length)
 }
