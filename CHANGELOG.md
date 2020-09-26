@@ -1,3 +1,9 @@
+## 0.11.0 (2020-09-26)
+
+### Breaking changes
+
+Adjust to new output format of repeat rules.
+
 ## 0.10.0 (2020-08-07)
 
 ### Breaking changes
