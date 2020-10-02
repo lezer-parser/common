@@ -819,7 +819,7 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
   /// The type of the current node.
   type: NodeType = NodeType.none
   /// The start offset of the current node.
-  start = -2 // (-1 means end of iteration, -2 means start)
+  start = 0 // (-1 means end of iteration, -2 means before top tree)
   /// The end offset of the current node.
   end = 0
   /// Whether the current node is being opened or closed (always true
@@ -832,8 +832,14 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
 
   /// @internal
   constructor(tree: Tree | TreeBuffer, private returnEnd: boolean) {
-    if (tree instanceof TreeBuffer) this.buffer = tree
-    else { this.trees.push(tree); this.offset.push(0); this.index.push(0) }
+    if (tree instanceof TreeBuffer) {
+      this.buffer = tree
+    } else {
+      this.trees.push(tree)
+      this.offset.push(0)
+      this.index.push(0)
+      if (tree.name) this.start = -2
+    }
   }
 
   private yield(open: boolean, type: NodeType, start: number, end: number) {
@@ -849,7 +855,7 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
     if (this.start < 0) {
       if (this.start == -1) return this
       // Special case yielding the tree at start of tree iteration
-      if (!this.buffer) return this.yield(true, this.trees[0].type, 0, this.trees[0].length)
+      return this.yield(true, this.trees[0].type, 0, this.trees[0].length)
     }
     for (;;) {
       let i = this.index.length - 1
@@ -897,6 +903,20 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
         }
       }
     }
+  }
+
+  /// Leaves the current node, moving the cursor to point at the next
+  /// element. This is only clearly defined when `this.open` is true.
+  leave() {
+    if (this.buffer && this.index.length > this.trees.length) {
+      let index = this.index.pop()!
+      this.bufIndex = this.buffer.buffer[index + 3]
+    } else {
+      this.trees.pop()
+      this.index.pop()
+      this.offset.pop()
+    }
+    return this.next()
   }
 }
 
