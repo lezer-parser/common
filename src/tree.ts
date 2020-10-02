@@ -435,13 +435,13 @@ export class Tree extends Subtree {
         if (start > from) continue
         child.iterInner(from, to, start, iter)
       }
-    }      
+    }
     if (iter.leave && this.type.name) iter.leave(this.type, offset, offset + this.length)
     return
   }
 
   iter(returnEnd = false) {
-    return new TreeIterator(this, returnEnd)
+    return new TreeIterator(this, 0, returnEnd)
   }
 
   /// @internal
@@ -513,7 +513,7 @@ export class Tree extends Subtree {
   }
 
   /// Build a tree from a postfix-ordered buffer of node information,
-  /// or a cursor over such a buffer. 
+  /// or a cursor over such a buffer.
   static build(data: BuildData) { return buildTree(data) }
 }
 
@@ -632,7 +632,7 @@ export class TreeBuffer {
   }
 
   iter(returnEnd = false) {
-    return new TreeIterator(this, returnEnd)
+    return new TreeIterator(this, 0, returnEnd)
   }
 
   /// @internal
@@ -751,7 +751,7 @@ class NodeSubtree extends Subtree {
     return iter.result
   }
 
-  iter() { return this.node.iter() }
+  iter(returnEnd = false) { return new TreeIterator(this.node, this.start, returnEnd) }
 }
 
 class BufferSubtree extends Subtree {
@@ -787,7 +787,7 @@ class BufferSubtree extends Subtree {
     return iter.result
   }
 
-  iter() { return this.buffer.iter() }
+  iter(returnEnd = false) { return new TreeIterator(this.buffer, this.start, returnEnd) }
 
   resolveAt(pos: number): Subtree {
     if (pos <= this.start || pos >= this.end) return this.parent.resolveAt(pos)
@@ -810,15 +810,17 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
   // tree's `children` array. For levels above this, this points at
   // the buffer index at the start of an open node.
   private index: number[] = []
-  private buffer: TreeBuffer | null = null
+  private buffer!: TreeBuffer | null
   // Buffer index that we're currently at, if `this.buffer` is not
   // null.
-  private bufIndex = 0
-  private bufOffset = 0
+  private bufIndex!: number
+  private bufOffset!: number
 
   // The amount of positions to skip (meaning nodes are only opened if
   // they extend beyond this)
-  private skipTo = 0
+  private skipTo!: number
+
+  private returnEnd!: boolean
 
   /// The type of the current node.
   type: NodeType = NodeType.none
@@ -835,12 +837,22 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
   get value() { return this }
 
   /// @internal
-  constructor(tree: Tree | TreeBuffer, private returnEnd: boolean) {
+  constructor(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean) {
+    this.reset(tree, offset, returnEnd)
+  }
+
+  /// @internal
+  reset(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean) {
+    this.skipTo = this.bufIndex = 0
+    this.bufOffset = offset
+    this.returnEnd = returnEnd
+    if (this.index.length) this.trees.length = this.index.length = this.offset.length = 0
     if (tree instanceof TreeBuffer) {
       this.buffer = tree
     } else {
+      this.buffer = null
       this.trees.push(tree)
-      this.offset.push(0)
+      this.offset.push(offset)
       this.index.push(0)
       if (tree.name) this.start = -2
     }
@@ -866,8 +878,8 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
     if (this.start < 0) {
       if (this.start == -1) return this
       // Special case yielding the tree at start of tree iteration
-      let end = this.trees[0].length
-      if (this.skipTo <= end) return this.yield(true, this.trees[0].type, 0, end)
+      let start = this.offset[0], end = start + this.trees[0].length
+      if (this.skipTo <= end) return this.yield(true, this.trees[0].type, start, end)
     }
 
     for (;;) {
