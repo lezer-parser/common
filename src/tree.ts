@@ -262,6 +262,8 @@ export abstract class Subtree {
   /// given, `args.leave` when it leaves a node.
   abstract iterate<T = any>(args: IterateArgs<T>): T | undefined
 
+  abstract iter(): TreeIterator
+
   /// Find the node at a given position. By default, this will return
   /// the lowest-depth subtree that covers the position from both
   /// sides, meaning that nodes starting or ending at the position
@@ -436,6 +438,10 @@ export class Tree extends Subtree {
     }      
     if (iter.leave && this.type.name) iter.leave(this.type, offset, offset + this.length)
     return
+  }
+
+  iter() {
+    return new TreeIterator(this)
   }
 
   /// @internal
@@ -625,6 +631,10 @@ export class TreeBuffer {
     }
   }
 
+  iter() {
+    return new TreeIterator(this)
+  }
+
   /// @internal
   iterChild<T>(from: number, to: number, offset: number, index: number, iter: Iteration<T>) {
     let type = this.group.types[this.buffer[index++]], start = this.buffer[index++] + offset,
@@ -740,6 +750,8 @@ class NodeSubtree extends Subtree {
     this.node.iterInner(from, to, this.start, iter)
     return iter.result
   }
+
+  iter() { return this.node.iter() }
 }
 
 class BufferSubtree extends Subtree {
@@ -775,6 +787,8 @@ class BufferSubtree extends Subtree {
     return iter.result
   }
 
+  iter() { return this.buffer.iter() }
+
   resolveAt(pos: number): Subtree {
     if (pos <= this.start || pos >= this.end) return this.parent.resolveAt(pos)
     let found = this.buffer.findIndex(pos, 0, this.bufferStart, this.index + 4, this.endIndex)
@@ -785,6 +799,97 @@ class BufferSubtree extends Subtree {
     let result: string[] = []
     this.buffer.childToString(this.index, result)
     return result.join("")
+  }
+}
+
+export class TreeIterator implements Iterator<boolean> {
+  private trees: Tree[] = []
+  // Offsets of the trees at each level
+  private offset: number[] = []
+  // For levels < this.trees.length, this holds an index into the
+  // tree's `children` array. For levels above this, this points at
+  // the buffer index at the start of an open node.
+  private index: number[] = []
+  private buffer: TreeBuffer | null = null
+  // Buffer index that we're currently at, if `this.buffer` is not
+  // null.
+  private bufIndex = 0
+  private bufOffset = 0
+
+  /// The type of the current node.
+  type: NodeType = NodeType.none
+  /// The start offset of the current node.
+  start = -2 // (-1 means end of iteration, -2 means start)
+  /// The end offset of the current node.
+  end = 0
+
+  get done() { return this.start < 0 }
+
+  get value() { return true } // FIXME
+
+  /// @internal
+  constructor(tree: Tree | TreeBuffer) {
+    if (tree instanceof TreeBuffer) this.buffer = tree
+    else { this.trees.push(tree); this.offset.push(0); this.index.push(0) }
+  }
+
+  /// Move to the next node. Returns the iterator itself.
+  next(): TreeIterator {
+    if (this.start < 0) {
+      if (this.start == -1) return this
+      if (!this.buffer) { // Special case yielding the tree at start of tree iteration
+        this.start = 0
+        this.end = this.trees[0].length
+        this.type = this.trees[0].type
+        return this
+      }
+    }
+    for (;;) {
+      let i = this.index.length - 1, index = this.index[i]
+      if (this.buffer) {
+        let buf = this.buffer.buffer
+        if (i >= this.trees.length && this.bufIndex == buf[index + 3]) { // End of current node
+          this.index.pop()
+        } else if (this.bufIndex == buf.length) { // End of buffer
+          this.buffer = null
+          if (!this.trees.length) { this.start = -1; return this }
+        } else {
+          this.index.push(this.bufIndex)
+          this.type = this.buffer.group.types[buf[this.bufIndex]]
+          this.start = buf[this.bufIndex + 1] + this.bufOffset
+          this.end = buf[this.bufIndex + 2] + this.bufOffset
+          this.bufIndex += 4
+          return this
+        }
+      } else {
+        let tree = this.trees[i]
+        if (index == tree.children.length) {
+          this.trees.pop()
+          this.index.pop()
+          this.offset.pop()
+          if (!this.trees.length) { this.start = -1; return this }
+        } else {
+          let next = tree.children[index]
+          this.index[i]++
+          if (next instanceof TreeBuffer) {
+            this.buffer = next
+            this.bufOffset = this.offset[i] + tree.positions[index]
+            this.bufIndex = 0
+          } else {
+            let start = this.offset[i] + tree.positions[index]
+            this.trees.push(next)
+            this.index.push(0)
+            this.offset.push(start)
+            if (next.type.name) {
+              this.type = next.type
+              this.start = start
+              this.end = this.start + next.length
+              return this
+            }
+          }
+        }
+      }
+    }
   }
 }
 
