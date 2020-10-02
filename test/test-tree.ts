@@ -39,7 +39,7 @@ function recur() {
       for (let i = 0; i < 20; i++) result += "abc"[i % 3]
       return result
     }
-  }(5)))
+  }(6)))
 }
 
 let _simple: Tree | null = null
@@ -80,7 +80,7 @@ describe("resolve", () => {
 
   it("can resolve in a large tree", () => {
     let tr = recur().resolve(10, 1)
-    ist(tr.depth, 6)
+    ist(tr.depth, 7)
   })
 
   it("caches resolved parents", () => {
@@ -103,5 +103,52 @@ describe("resolve", () => {
     ist(tr.childAfter(0)!.name, "b")
     ist(tr.childAfter(13)!.start, 13)
     ist(tr.childAfter(22), null)
+  })
+})
+
+describe("iteration", () => {
+  it("iterates over all nodes", () => {
+    let openCount: Record<string, number> = Object.create(null)
+    let closeCount: Record<string, number> = Object.create(null)
+    let pos = 0
+    for (let iter = simple().iter(true); !iter.next().done;) {
+      let [ref, count] = iter.open ? [iter.start, openCount] : [iter.end, closeCount]
+      ist(ref, pos, ">=")
+      pos = ref
+      count[iter.type.name] = (count[iter.type.name] || 0) + 1
+    }
+    let expected = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
+    for (let k of Object.keys(expected)) {
+      ist(openCount[k], expected[k])
+      ist(closeCount[k], expected[k])
+    }
+  })
+
+  it("can leave nodes", () => {
+    ist(simple().iter().next().leave().done)
+    let i = simple().iter().next().next().next()
+    ist(i.start, 1)
+    i.leave()
+    ist(i.start, 2)
+    for (let j = 0; j < 6; j++) i.next()
+    ist(i.start, 8)
+    i.leave()
+    ist(i.start, 13)
+    i.leave()
+    ist(i.start, 18)
+  })
+
+  it("can skip content", () => {
+    let tree = recur(), start = tree.length >> 1, iter = tree.iter()
+    iter.skip(start)
+    for (; !iter.done; iter.next()) ist(iter.end, start, ">=")
+  })
+
+  it("isn't slow", () => {
+    let tree = recur(), t0 = Date.now(), count = 0
+    for (let i = 0; i < 2000; i++)
+      for (let iter = tree.iter(); !iter.next().done;) count++
+    let perMS = count / (Date.now() - t0)
+    ist(perMS, 10000, ">")
   })
 })

@@ -816,6 +816,10 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
   private bufIndex = 0
   private bufOffset = 0
 
+  // The amount of positions to skip (meaning nodes are only opened if
+  // they extend beyond this)
+  private skipTo = 0
+
   /// The type of the current node.
   type: NodeType = NodeType.none
   /// The start offset of the current node.
@@ -850,13 +854,22 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
     return this
   }
 
-  /// Move to the next node. Returns the iterator itself.
+  /// Skip to the given position. This means that nodes that are
+  /// entirely before that position will not be entered (though nodes
+  /// that start before it but reach up to `to` _will_).
+  skip(to: number) {
+    this.skipTo = to
+  }
+
+  /// Returns the iterator itself.
   next(): TreeIterator {
     if (this.start < 0) {
       if (this.start == -1) return this
       // Special case yielding the tree at start of tree iteration
-      return this.yield(true, this.trees[0].type, 0, this.trees[0].length)
+      let end = this.trees[0].length
+      if (this.skipTo <= end) return this.yield(true, this.trees[0].type, 0, end)
     }
+
     for (;;) {
       let i = this.index.length - 1
       if (i < 0) { this.start = -1; return this }
@@ -872,11 +885,15 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
         } else if (this.bufIndex == buf.length) { // End of buffer
           this.buffer = null
         } else {
-          this.index.push(this.bufIndex)
-          this.bufIndex += 4
-          return this.yield(true, this.buffer.group.types[buf[this.bufIndex - 4]],
-                            buf[this.bufIndex - 3] + this.bufOffset,
-                            buf[this.bufIndex - 2] + this.bufOffset)
+          let end = buf[this.bufIndex + 2] + this.bufOffset
+          if (end >= this.skipTo) {
+            this.index.push(this.bufIndex)
+            this.bufIndex += 4
+            return this.yield(true, this.buffer.group.types[buf[this.bufIndex - 4]],
+                              buf[this.bufIndex - 3] + this.bufOffset, end)
+          } else {
+            this.bufIndex = buf[this.bufIndex + 3]
+          }
         }
       } else {
         let tree = this.trees[i]
@@ -894,11 +911,13 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
             this.bufOffset = this.offset[i] + tree.positions[index]
             this.bufIndex = 0
           } else {
-            let start = this.offset[i] + tree.positions[index]
-            this.trees.push(next)
-            this.index.push(0)
-            this.offset.push(start)
-            if (next.type.name) return this.yield(true, next.type, start, start + next.length)
+            let start = this.offset[i] + tree.positions[index], end = start + next.length
+            if (end >= this.skipTo) {
+              this.trees.push(next)
+              this.index.push(0)
+              this.offset.push(start)
+              if (next.type.name) return this.yield(true, next.type, start, start + next.length)
+            }
           }
         }
       }
