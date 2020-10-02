@@ -262,7 +262,7 @@ export abstract class Subtree {
   /// given, `args.leave` when it leaves a node.
   abstract iterate<T = any>(args: IterateArgs<T>): T | undefined
 
-  abstract iter(): TreeIterator
+  abstract iter(returnEnd?: boolean): TreeIterator
 
   /// Find the node at a given position. By default, this will return
   /// the lowest-depth subtree that covers the position from both
@@ -440,8 +440,8 @@ export class Tree extends Subtree {
     return
   }
 
-  iter() {
-    return new TreeIterator(this)
+  iter(returnEnd = false) {
+    return new TreeIterator(this, returnEnd)
   }
 
   /// @internal
@@ -631,8 +631,8 @@ export class TreeBuffer {
     }
   }
 
-  iter() {
-    return new TreeIterator(this)
+  iter(returnEnd = false) {
+    return new TreeIterator(this, returnEnd)
   }
 
   /// @internal
@@ -802,7 +802,7 @@ class BufferSubtree extends Subtree {
   }
 }
 
-export class TreeIterator implements Iterator<boolean> {
+export class TreeIterator implements Iterator<{type: NodeType, start: number, end: number}> {
   private trees: Tree[] = []
   // Offsets of the trees at each level
   private offset: number[] = []
@@ -822,52 +822,64 @@ export class TreeIterator implements Iterator<boolean> {
   start = -2 // (-1 means end of iteration, -2 means start)
   /// The end offset of the current node.
   end = 0
+  /// Whether the current node is being opened or closed (always true
+  /// when `returnEnd` is false).
+  open = true
 
   get done() { return this.start < 0 }
 
-  get value() { return true } // FIXME
+  get value() { return this }
 
   /// @internal
-  constructor(tree: Tree | TreeBuffer) {
+  constructor(tree: Tree | TreeBuffer, private returnEnd: boolean) {
     if (tree instanceof TreeBuffer) this.buffer = tree
     else { this.trees.push(tree); this.offset.push(0); this.index.push(0) }
+  }
+
+  private yield(open: boolean, type: NodeType, start: number, end: number) {
+    this.open = open
+    this.type = type
+    this.start = start
+    this.end = end
+    return this
   }
 
   /// Move to the next node. Returns the iterator itself.
   next(): TreeIterator {
     if (this.start < 0) {
       if (this.start == -1) return this
-      if (!this.buffer) { // Special case yielding the tree at start of tree iteration
-        this.start = 0
-        this.end = this.trees[0].length
-        this.type = this.trees[0].type
-        return this
-      }
+      // Special case yielding the tree at start of tree iteration
+      if (!this.buffer) return this.yield(true, this.trees[0].type, 0, this.trees[0].length)
     }
     for (;;) {
-      let i = this.index.length - 1, index = this.index[i]
+      let i = this.index.length - 1
+      if (i < 0) { this.start = -1; return this }
+      let index = this.index[i]
       if (this.buffer) {
         let buf = this.buffer.buffer
         if (i >= this.trees.length && this.bufIndex == buf[index + 3]) { // End of current node
           this.index.pop()
+          if (this.returnEnd)
+            return this.yield(false, this.buffer.group.types[buf[index]],
+                              buf[index + 1] + this.bufOffset,
+                              buf[index + 2] + this.bufOffset)
         } else if (this.bufIndex == buf.length) { // End of buffer
           this.buffer = null
-          if (!this.trees.length) { this.start = -1; return this }
         } else {
           this.index.push(this.bufIndex)
-          this.type = this.buffer.group.types[buf[this.bufIndex]]
-          this.start = buf[this.bufIndex + 1] + this.bufOffset
-          this.end = buf[this.bufIndex + 2] + this.bufOffset
           this.bufIndex += 4
-          return this
+          return this.yield(true, this.buffer.group.types[buf[this.bufIndex - 4]],
+                            buf[this.bufIndex - 3] + this.bufOffset,
+                            buf[this.bufIndex - 2] + this.bufOffset)
         }
       } else {
         let tree = this.trees[i]
         if (index == tree.children.length) {
-          this.trees.pop()
+          let tree = this.trees.pop()!
           this.index.pop()
-          this.offset.pop()
-          if (!this.trees.length) { this.start = -1; return this }
+          let offset = this.offset.pop()!
+          if (this.returnEnd)
+            return this.yield(false, tree.type, offset, offset + tree.length)
         } else {
           let next = tree.children[index]
           this.index[i]++
@@ -880,12 +892,7 @@ export class TreeIterator implements Iterator<boolean> {
             this.trees.push(next)
             this.index.push(0)
             this.offset.push(start)
-            if (next.type.name) {
-              this.type = next.type
-              this.start = start
-              this.end = this.start + next.length
-              return this
-            }
+            if (next.type.name) return this.yield(true, next.type, start, start + next.length)
           }
         }
       }
