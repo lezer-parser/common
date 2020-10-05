@@ -441,7 +441,7 @@ export class Tree extends Subtree {
   }
 
   iter(returnEnd = false) {
-    return new TreeIterator(this, 0, returnEnd)
+    return new TreeIterator(this, 0, returnEnd, this)
   }
 
   /// @internal
@@ -631,10 +631,6 @@ export class TreeBuffer {
     }
   }
 
-  iter(returnEnd = false) {
-    return new TreeIterator(this, 0, returnEnd)
-  }
-
   /// @internal
   iterChild<T>(from: number, to: number, offset: number, index: number, iter: Iteration<T>) {
     let type = this.group.types[this.buffer[index++]], start = this.buffer[index++] + offset,
@@ -751,7 +747,7 @@ class NodeSubtree extends Subtree {
     return iter.result
   }
 
-  iter(returnEnd = false) { return new TreeIterator(this.node, this.start, returnEnd) }
+  iter(returnEnd = false) { return new TreeIterator(this.node, this.start, returnEnd, this) }
 }
 
 class BufferSubtree extends Subtree {
@@ -787,7 +783,7 @@ class BufferSubtree extends Subtree {
     return iter.result
   }
 
-  iter(returnEnd = false) { return new TreeIterator(this.buffer, this.start, returnEnd) }
+  iter(returnEnd = false) { return new TreeIterator(this.buffer, this.start, returnEnd, this) }
 
   resolveAt(pos: number): Subtree {
     if (pos <= this.start || pos >= this.end) return this.parent.resolveAt(pos)
@@ -822,6 +818,8 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
 
   private returnEnd!: boolean
 
+  private baseSubtree!: Subtree
+
   /// The type of the current node.
   type: NodeType = NodeType.none
   /// The start offset of the current node.
@@ -830,22 +828,23 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
   end = 0
   /// Whether the current node is being opened or closed (always true
   /// when `returnEnd` is false).
-  open = true
+  open = false
 
   get done() { return this.start < 0 }
 
   get value() { return this }
 
   /// @internal
-  constructor(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean) {
-    this.reset(tree, offset, returnEnd)
+  constructor(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean, subtree: Subtree) {
+    this.reset(tree, offset, returnEnd, subtree)
   }
 
   /// @internal
-  reset(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean) {
+  reset(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean, subtree: Subtree) {
     this.skipTo = this.bufIndex = 0
     this.bufOffset = offset
     this.returnEnd = returnEnd
+    this.baseSubtree = subtree
     if (this.index.length) this.trees.length = this.index.length = this.offset.length = 0
     if (tree instanceof TreeBuffer) {
       this.buffer = tree
@@ -934,6 +933,36 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
         }
       }
     }
+  }
+
+  subtree() {
+    if (!this.open || this.start < 0) throw new Error("Can only take a subtree when the iterator is at an open token")
+    let tree = this.baseSubtree, i = this.index.length - 1
+    scanUp: for (; i >= 0; i--) {
+      if (i >= this.trees.length) { // In a buffer
+        while (tree instanceof BufferSubtree) {
+          if (tree.buffer == this.buffer) {
+            if (tree.index == this.index[i]) { i++; break scanUp }
+            if (tree.index < this.index[i]) continue scanUp
+          }
+          tree = tree.parent!
+        }
+      } else {
+        let node = this.trees[i]
+        while (tree instanceof BufferSubtree) tree = tree.parent!
+        while (tree instanceof NodeSubtree) {
+          if (tree.node == node) { i++; break scanUp }
+          if (tree.start < this.offset[i] || tree.node.length > node.length) continue scanUp
+          tree = tree.parent!
+        }
+        if (tree == node) { i++; break }
+      }
+    }
+    for (; i < this.trees.length; i++)
+      tree = new NodeSubtree(this.trees[i], this.offset[i], tree)
+    for (; i < this.index.length; i++)
+      tree = new BufferSubtree(this.buffer!, this.bufOffset, this.index[i], tree)
+    return this.baseSubtree = tree
   }
 
   /// Leaves the current node, moving the cursor to point at the next

@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType} from ".."
+import {Tree, NodeGroup, NodeType, Subtree} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
@@ -150,5 +150,58 @@ describe("iteration", () => {
       for (let iter = tree.iter(); !iter.next().done;) count++
     let perMS = count / (Date.now() - t0)
     ist(perMS, 10000, ">")
+  })
+
+  it("can produce subtrees", () => {
+    let tree: Subtree
+    for (let i = simple().iter(); i.next();) {
+      if (i.start == 8) { tree = i.subtree(); break }
+    }
+    ist(tree.name, "Br")
+    ist(tree.start, 8)
+    ist(tree.parent!.name, "Pa")
+    ist(tree.parent!.start, 4)
+    ist(tree.parent!.parent!.name, "T")
+    ist(tree.parent!.parent!.start, 0)
+    ist(tree.parent!.parent!.parent, null)
+  })
+
+  it("can produce subtrees from iterators created from buffer subtrees", () => {
+    let tree: Subtree
+    for (let i = simple().resolve(8).iter(); i.next();) {
+      if (i.start == 10) { tree = i.subtree(); break }
+    }
+    ist(tree.name, "c")
+    ist(tree.start, 10)
+    ist(tree.parent!.name, "Br")
+    ist(tree.parent!.start, 8)
+    ist(tree.parent!.parent!.name, "Pa")
+    ist(tree.parent!.parent!.start, 4)
+  })
+
+  it("can produce subtrees from iterators created from node subtrees", () => {
+    let tree: Subtree
+    for (let i = simple().resolve(2).iter(); i.next();) {
+      if (i.start == 4) { tree = i.subtree(); break }
+    }
+    ist(tree.name, "Pa")
+    ist(tree.start, 4)
+    ist(tree.parent!.name, "T")
+    ist(tree.parent!.start, 0)
+    ist(tree.parent!.parent, null)
+  })
+
+  it("reuses parent subtrees for multiple subtree queries", () => {
+    let i = simple().iter()
+    while (i.start < 10) i.next()
+    let tr10 = i.subtree()
+    ist(i.subtree(), tr10)
+    i.next()
+    ist(i.subtree().start, 11)
+    ist(i.subtree().parent, tr10.parent)
+    while (i.start < 13) i.next()
+    ist(i.subtree().start, 13)
+    ist(i.subtree().name, "Br")
+    ist(i.subtree().parent, tr10.parent!.parent)
   })
 })
