@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType, Subtree, BufferPosition, TreePosition, BufferTopPosition} from ".."
+import {Tree, NodeGroup, NodeType, Subtree, BufferPosition, TreePosition} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
@@ -25,7 +25,7 @@ function mk(spec: string) {
     }
     pos += m.length
   }
-  return Tree.build({buffer, group, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id})
+  return Tree.build({buffer, group, topID: 0, maxBufferLength: 10000, minRepeatType: repeat.id})
 }
 
 let _recur: Tree | null = null
@@ -160,7 +160,7 @@ describe("iteration", () => {
   it("positions are slow", () => {
     let tree = recur(), t0 = Date.now(), count = 0
     for (let i = 0; i < 20000; i++)
-      for (let c: TreePosition | BufferPosition | BufferTopPosition | null = new TreePosition(null, tree, 0, 0); c; c = c.next()) {
+      for (let c: TreePosition | BufferPosition | null = new TreePosition(null, tree, 0, 0); c; c = c.next()) {
         if (c.start < 0 || c.type.name == "WOO") throw new Error("HAY")
         count++
       }

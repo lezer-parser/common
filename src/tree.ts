@@ -982,38 +982,48 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
   }
 }
 
-function nextPos(pos: TreePosition | BufferPosition | BufferTopPosition) {
+function nextPos(pos: TreePosition | BufferPosition) {
   for (;;) {
     let next = pos.firstChild()
-    for (let cur: TreePosition | BufferPosition | BufferTopPosition | null = pos; !next && cur; cur = cur.parent)
+    for (let cur: TreePosition | BufferPosition | null = pos; !next && cur; cur = cur.up())
       next = cur.nextSibling()
     if (!next || next.type.name) return next
     pos = next
   }
 }
 
-function treeNextSibling(pos: TreePosition | BufferTopPosition) {
-  let {parent, index} = pos
-  if (!parent || index + 1 == parent.tree.children.length) return null
-  let next = parent.tree.children[index + 1], start = parent.tree.positions[index + 1] + parent.start
-  if (next instanceof TreeBuffer)
-    return new BufferTopPosition(parent, next, start, pos.index + 1)
-  else
-    return new TreePosition(parent, next, start, pos.index + 1)
+function hasChild(tree: Tree): boolean {
+  return tree.children.some(ch => ch.type.name || ch instanceof TreeBuffer || hasChild(ch))
+}
+
+function childAfter(parent: TreePosition, i: number): TreePosition | BufferPosition | null {
+  for (let {children, positions} = parent.tree; i < children.length; i++) {
+    let next = children[i], start = positions[i] + parent.start
+    if (next instanceof TreeBuffer)
+      return new BufferPosition(parent, next, start, i, [], 0)
+    else if (next.type.name || hasChild(next))
+      return new TreePosition(parent, next, start, i)
+  }
+  return parent.type.name || !parent.parent ? null : childAfter(parent.parent, parent.index + 1)
+}
+
+function treeNextSibling(pos: TreePosition | BufferPosition) {
+  return pos.parent ? childAfter(pos.parent, pos.index + 1) : null
+}
+
+function nextNamed(pos: TreePosition | null) {
+  for (;; pos = pos.parent) if (!pos || pos.type.name) return pos
 }
 
 export class TreePosition {
   constructor(readonly parent: TreePosition | null,
               readonly tree: Tree,
               readonly start: number,
-              readonly index: number) {if(!tree) throw new Error("OP")
-  }
+              readonly index: number) {}
 
-  firstChild() {
-    if (!this.tree.children.length) return null
-    let first = this.tree.children[0], pos = this.tree.positions[0] + this.start
-    return first instanceof TreeBuffer ? new BufferTopPosition(this, first, pos, 0) : new TreePosition(this, first, pos, 0)
-  }
+  firstChild() { return childAfter(this, 0) }
+
+  up() { return nextNamed(this.parent) }
 
   nextSibling() { return treeNextSibling(this) }
 
@@ -1024,52 +1034,47 @@ export class TreePosition {
   get end() { return this.start + this.tree.length }
 }
 
-export class BufferTopPosition {
+export class BufferPosition {
   constructor(readonly parent: TreePosition | null,
               readonly buffer: TreeBuffer,
-              readonly start: number,
-              readonly index: number) {}
+              readonly bufStart: number,
+              readonly index: number,
+              readonly stack: number[],
+              public bufIndex: number) {}
 
   firstChild() {
-    return new BufferPosition(this, this, 0)
+    let next = this.bufIndex + 4, end = this.buffer.buffer[this.bufIndex + 3]
+    if (end == next) return null
+    this.bufIndex = next
+    return this
   }
 
-  nextSibling() { return treeNextSibling(this) }
-    
-  next() { return nextPos(this) }
-
-  get type() { return this.buffer.type }
-
-  get end() { return this.start + this.buffer.length }
-}
-
-export class BufferPosition {
-  constructor(readonly top: BufferTopPosition,
-              readonly parent: BufferPosition | BufferTopPosition,
-              readonly index: number) {}
-
-  firstChild() {
-    let end = this.top.buffer.buffer[this.index + 3]
-    if (end == this.index + 4) return null
-    return new BufferPosition(this.top, this, this.index + 4)
+  up() {
+    if (!this.stack.length) return nextNamed(this.parent)
+    this.bufIndex = this.stack.pop()!
+    return this
   }
 
   nextSibling() {
-    let {parent, top} = this, buf = top.buffer.buffer
-    let after = buf[this.index + 3]
-    let end = parent == top ? buf.length : buf[parent.index + 3]
-    return after == end ? null : new BufferPosition(this.top, parent, after)
+    let {buffer} = this.buffer
+    let after = buffer[this.bufIndex + 3], d = this.stack.length - 1
+    if (d < 0) {
+      if (after == buffer.length) return treeNextSibling(this)
+    } else if (after == buffer[this.stack[d] + 3]) {
+      return null
+    }
+    this.bufIndex = after
+    return this
   }
-
+    
   next() { return nextPos(this) }
 
-  get type() { return this.top.buffer.group.types[this.top.buffer.buffer[this.index]] }
+  get type() { return this.buffer.group.types[this.buffer.buffer[this.bufIndex]] }
 
-  get start() { return this.top.start + this.top.buffer.buffer[this.index + 1] }
+  get start() { return this.bufStart + this.buffer.buffer[this.bufIndex + 1] }
 
-  get end() { return this.top.start + this.top.buffer.buffer[this.index + 2] }
+  get end() { return this.bufStart + this.buffer.buffer[this.bufIndex + 2] }
 }
-  
 
 /// This is used by `Tree.build` as an abstraction for iterating over
 /// a tree buffer. A cursor initially points at the very last element
