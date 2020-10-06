@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType, Subtree} from ".."
+import {Tree, NodeGroup, NodeType, Subtree, BufferPosition, TreePosition, BufferTopPosition} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
@@ -146,9 +146,40 @@ describe("iteration", () => {
 
   it("isn't slow", () => {
     let tree = recur(), t0 = Date.now(), count = 0
-    for (let i = 0; i < 2000; i++)
-      for (let iter = tree.iter(); !iter.next().done;) count++
+    for (let i = 0; i < 20000; i++)
+      for (let iter = tree.iter(); !iter.next().done;) {
+        if (iter.start < 0 || iter.type.name == "WOO") throw new Error("HAY")
+        count++
+      }
+    console.log(count)
     let perMS = count / (Date.now() - t0)
+    console.log("iter", perMS)
+    ist(perMS, 10000, ">")
+  })
+
+  it("positions are slow", () => {
+    let tree = recur(), t0 = Date.now(), count = 0
+    for (let i = 0; i < 20000; i++)
+      for (let c: TreePosition | BufferPosition | BufferTopPosition | null = new TreePosition(null, tree, 0, 0); c; c = c.next()) {
+        if (c.start < 0 || c.type.name == "WOO") throw new Error("HAY")
+        count++
+      }
+    console.log(count)
+    let perMS = count / (Date.now() - t0)
+    console.log("pos", perMS)
+    ist(perMS, 10000, ">")
+  })
+
+  it("YOU are slow", () => {
+    let tree = recur(), t0 = Date.now(), count = 0
+    for (let i = 0; i < 20000; i++)
+      tree.iterate({enter(t, s) {
+        if (s < 0 || t.name == "WOO") throw new Error("HAY")
+        count++
+      }})
+    console.log(count)
+    let perMS = count / (Date.now() - t0)
+    console.log("pos", perMS)
     ist(perMS, 10000, ">")
   })
 

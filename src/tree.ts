@@ -441,7 +441,7 @@ export class Tree extends Subtree {
   }
 
   iter(returnEnd = false) {
-    return new TreeIterator(this, 0, returnEnd, this)
+    return new TreeIterator(this, returnEnd)
   }
 
   /// @internal
@@ -747,7 +747,7 @@ class NodeSubtree extends Subtree {
     return iter.result
   }
 
-  iter(returnEnd = false) { return new TreeIterator(this.node, this.start, returnEnd, this) }
+  iter(returnEnd = false) { return new TreeIterator(this, returnEnd) }
 }
 
 class BufferSubtree extends Subtree {
@@ -783,7 +783,7 @@ class BufferSubtree extends Subtree {
     return iter.result
   }
 
-  iter(returnEnd = false) { return new TreeIterator(this.buffer, this.start, returnEnd, this) }
+  iter(returnEnd = false) { return new TreeIterator(this, returnEnd) }
 
   resolveAt(pos: number): Subtree {
     if (pos <= this.start || pos >= this.end) return this.parent.resolveAt(pos)
@@ -835,25 +835,27 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
   get value() { return this }
 
   /// @internal
-  constructor(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean, subtree: Subtree) {
-    this.reset(tree, offset, returnEnd, subtree)
+  constructor(context: Tree | BufferSubtree | NodeSubtree, returnEnd: boolean) {
+    this.reset(context, returnEnd)
   }
 
   /// @internal
-  reset(tree: Tree | TreeBuffer, offset: number, returnEnd: boolean, subtree: Subtree) {
-    this.skipTo = this.bufIndex = 0
-    this.bufOffset = offset
+  reset(context: Tree | BufferSubtree | NodeSubtree, returnEnd: boolean) {
+    this.skipTo = 0
     this.returnEnd = returnEnd
-    this.baseSubtree = subtree
+    this.baseSubtree = context
     if (this.index.length) this.trees.length = this.index.length = this.offset.length = 0
-    if (tree instanceof TreeBuffer) {
-      this.buffer = tree
+    if (context instanceof BufferSubtree) {
+      this.buffer = context.buffer
+      this.bufOffset = context.start
+      this.bufIndex = context.index
     } else {
       this.buffer = null
-      this.trees.push(tree)
-      this.offset.push(offset)
+      this.bufIndex = this.bufOffset = 0
+      this.trees.push(context instanceof NodeSubtree ? context.node : context)
+      this.offset.push(context.start)
       this.index.push(0)
-      if (tree.name) this.start = -2
+      if (context.name) this.start = -2
     }
   }
 
@@ -979,6 +981,95 @@ export class TreeIterator implements Iterator<{type: NodeType, start: number, en
     return this.next()
   }
 }
+
+function nextPos(pos: TreePosition | BufferPosition | BufferTopPosition) {
+  for (;;) {
+    let next = pos.firstChild()
+    for (let cur: TreePosition | BufferPosition | BufferTopPosition | null = pos; !next && cur; cur = cur.parent)
+      next = cur.nextSibling()
+    if (!next || next.type.name) return next
+    pos = next
+  }
+}
+
+function treeNextSibling(pos: TreePosition | BufferTopPosition) {
+  let {parent, index} = pos
+  if (!parent || index + 1 == parent.tree.children.length) return null
+  let next = parent.tree.children[index + 1], start = parent.tree.positions[index + 1] + parent.start
+  if (next instanceof TreeBuffer)
+    return new BufferTopPosition(parent, next, start, pos.index + 1)
+  else
+    return new TreePosition(parent, next, start, pos.index + 1)
+}
+
+export class TreePosition {
+  constructor(readonly parent: TreePosition | null,
+              readonly tree: Tree,
+              readonly start: number,
+              readonly index: number) {if(!tree) throw new Error("OP")
+  }
+
+  firstChild() {
+    if (!this.tree.children.length) return null
+    let first = this.tree.children[0], pos = this.tree.positions[0] + this.start
+    return first instanceof TreeBuffer ? new BufferTopPosition(this, first, pos, 0) : new TreePosition(this, first, pos, 0)
+  }
+
+  nextSibling() { return treeNextSibling(this) }
+
+  next() { return nextPos(this) }
+
+  get type() { return this.tree.type }
+
+  get end() { return this.start + this.tree.length }
+}
+
+export class BufferTopPosition {
+  constructor(readonly parent: TreePosition | null,
+              readonly buffer: TreeBuffer,
+              readonly start: number,
+              readonly index: number) {}
+
+  firstChild() {
+    return new BufferPosition(this, this, 0)
+  }
+
+  nextSibling() { return treeNextSibling(this) }
+    
+  next() { return nextPos(this) }
+
+  get type() { return this.buffer.type }
+
+  get end() { return this.start + this.buffer.length }
+}
+
+export class BufferPosition {
+  constructor(readonly top: BufferTopPosition,
+              readonly parent: BufferPosition | BufferTopPosition,
+              readonly index: number) {}
+
+  firstChild() {
+    let end = this.top.buffer.buffer[this.index + 3]
+    if (end == this.index + 4) return null
+    return new BufferPosition(this.top, this, this.index + 4)
+  }
+
+  nextSibling() {
+    let {parent, top} = this, buf = top.buffer.buffer
+    let after = buf[this.index + 3]
+    let end = parent == top ? buf.length : buf[parent.index + 3]
+    return after == end ? null : new BufferPosition(this.top, parent, after)
+  }
+
+  next() { return nextPos(this) }
+
+  get type() { return this.top.buffer.group.types[this.top.buffer.buffer[this.index]] }
+
+  get start() { return this.top.start + this.top.buffer.buffer[this.index + 1] }
+
+  get end() { return this.top.start + this.top.buffer.buffer[this.index + 2] }
+}
+  
 
 /// This is used by `Tree.build` as an abstraction for iterating over
 /// a tree buffer. A cursor initially points at the very last element
