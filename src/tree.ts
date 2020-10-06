@@ -262,7 +262,7 @@ export abstract class Subtree {
   /// given, `args.leave` when it leaves a node.
   abstract iterate<T = any>(args: IterateArgs<T>): T | undefined
 
-  abstract iter(returnEnd?: boolean): TreeIterator
+  abstract cursor(): TreeCursor
 
   /// Find the node at a given position. By default, this will return
   /// the lowest-depth subtree that covers the position from both
@@ -440,9 +440,7 @@ export class Tree extends Subtree {
     return
   }
 
-  iter(returnEnd = false) {
-    return new TreeIterator(this, returnEnd)
-  }
+  cursor() { return new TreeCursor(new NodeSubtree(this, 0, 0, null)) }
 
   /// @internal
   resolveAt(pos: number): Subtree {
@@ -455,19 +453,19 @@ export class Tree extends Subtree {
       }
     }
     cacheRoot = this
-    return cached = this.resolveInner(pos, 0, this)
+    return cached = this.resolveInner(pos, 0, new NodeSubtree(this, 0, 0, null))
   }
 
   childBefore(pos: number): Subtree | null {
-    return this.findChild(pos, -1, 0, this)
+    return this.findChild(pos, -1, 0, new NodeSubtree(this, 0, 0, null))
   }
 
   childAfter(pos: number): Subtree | null {
-    return this.findChild(pos, 1, 0, this)
+    return this.findChild(pos, 1, 0, new NodeSubtree(this, 0, 0, null))
   }
 
   /// @internal
-  findChild(pos: number, side: number, start: number, parent: Subtree): Subtree | null {
+  findChild(pos: number, side: number, start: number, parent: NodeSubtree): Subtree | null {
     for (let i = 0; i < this.children.length; i++) {
       let childStart = this.positions[i] + start, select = -1
       if (childStart >= pos) {
@@ -481,7 +479,7 @@ export class Tree extends Subtree {
         let child = this.children[select], childStart = this.positions[select] + start
         if (child.length == 0 && childStart == pos) continue
         if (child instanceof Tree) {
-          if (child.type.name) return new NodeSubtree(child, childStart, parent)
+          if (child.type.name) return new NodeSubtree(child, childStart, select, parent)
           return child.findChild(pos, side, childStart, parent)
         } else {
           let found = child.findIndex(pos, side, childStart, 0, child.buffer.length)
@@ -493,7 +491,7 @@ export class Tree extends Subtree {
   }
 
   /// @internal
-  resolveInner(pos: number, start: number, parent: Subtree): Subtree {
+  resolveInner(pos: number, start: number, parent: NodeSubtree): Subtree {
     let found = this.findChild(pos, 0, start, parent)
     return found ? found.resolveAt(pos) : parent
   }
@@ -717,7 +715,8 @@ export class TreeBuffer {
 class NodeSubtree extends Subtree {
   constructor(readonly node: Tree,
               readonly start: number,
-              readonly parent: Subtree) {
+              readonly index: number,
+              readonly parent: NodeSubtree | null) {
     super()
   }
 
@@ -726,7 +725,7 @@ class NodeSubtree extends Subtree {
   get end() { return this.start + this.node.length }
 
   resolveAt(pos: number): Subtree {
-    if (pos <= this.start || pos >= this.end)
+    if ((pos <= this.start || pos >= this.end) && this.parent)
       return this.parent.resolveAt(pos)
     return this.node.resolveInner(pos, this.start, this)
   }
@@ -747,7 +746,7 @@ class NodeSubtree extends Subtree {
     return iter.result
   }
 
-  iter(returnEnd = false) { return new TreeIterator(this, returnEnd) }
+  cursor() { return new TreeCursor(this) }
 }
 
 class BufferSubtree extends Subtree {
@@ -783,7 +782,7 @@ class BufferSubtree extends Subtree {
     return iter.result
   }
 
-  iter(returnEnd = false) { return new TreeIterator(this, returnEnd) }
+  cursor() { return new TreeCursor(this) }
 
   resolveAt(pos: number): Subtree {
     if (pos <= this.start || pos >= this.end) return this.parent.resolveAt(pos)
@@ -798,282 +797,133 @@ class BufferSubtree extends Subtree {
   }
 }
 
-export class TreeIterator implements Iterator<{type: NodeType, start: number, end: number}> {
-  private trees: Tree[] = []
-  // Offsets of the trees at each level
-  private offset: number[] = []
-  // For levels < this.trees.length, this holds an index into the
-  // tree's `children` array. For levels above this, this points at
-  // the buffer index at the start of an open node.
-  private index: number[] = []
-  private buffer!: TreeBuffer | null
-  // Buffer index that we're currently at, if `this.buffer` is not
-  // null.
-  private bufIndex!: number
-  private bufOffset!: number
+class TreeCursor {
+  node: NodeSubtree
+  buffer: TreeBuffer | null = null
+  bufStart = 0
+  bufStack: number[] = []
+  bufPos = 0
+  bufIndex = 0
 
-  // The amount of positions to skip (meaning nodes are only opened if
-  // they extend beyond this)
-  private skipTo!: number
-
-  private returnEnd!: boolean
-
-  private baseSubtree!: Subtree
-
-  /// The type of the current node.
-  type: NodeType = NodeType.none
-  /// The start offset of the current node.
-  start = 0 // (-1 means end of iteration, -2 means before top tree)
-  /// The end offset of the current node.
+  type = NodeType.none
+  start = 0
   end = 0
-  /// Whether the current node is being opened or closed (always true
-  /// when `returnEnd` is false).
-  open = false
-
-  get done() { return this.start < 0 }
-
-  get value() { return this }
 
   /// @internal
-  constructor(context: Tree | BufferSubtree | NodeSubtree, returnEnd: boolean) {
-    this.reset(context, returnEnd)
-  }
-
-  /// @internal
-  reset(context: Tree | BufferSubtree | NodeSubtree, returnEnd: boolean) {
-    this.skipTo = 0
-    this.returnEnd = returnEnd
-    this.baseSubtree = context
-    if (this.index.length) this.trees.length = this.index.length = this.offset.length = 0
-    if (context instanceof BufferSubtree) {
-      this.buffer = context.buffer
-      this.bufOffset = context.start
-      this.bufIndex = context.index
+  constructor(start: NodeSubtree | BufferSubtree) {
+    if (start instanceof BufferSubtree) {
+      this.buffer = start.buffer
+      this.bufPos = start.index
+      this.bufStart = start.bufferStart
+      start = start.parent as NodeSubtree | BufferSubtree
+      while (start instanceof BufferSubtree) {
+        this.bufStack.push(start.index)
+        start = start.parent as NodeSubtree | BufferSubtree
+      }
+      this.bufStack.reverse()
+      this.bufIndex = start.node.children.indexOf(this.buffer)
+      this.yieldBuf(this.bufIndex)
     } else {
-      this.buffer = null
-      this.bufIndex = this.bufOffset = 0
-      this.trees.push(context instanceof NodeSubtree ? context.node : context)
-      this.offset.push(context.start)
-      this.index.push(0)
-      if (context.name) this.start = -2
+      this.yield(start.type, start.start, start.end)
     }
+    this.node = start
   }
 
-  private yield(open: boolean, type: NodeType, start: number, end: number) {
-    this.open = open
+  private yield(type: NodeType, start: number, end: number) {
     this.type = type
     this.start = start
     this.end = end
-    return this
+    return true
   }
 
-  /// Skip to the given position. This means that nodes that are
-  /// entirely before that position will not be entered (though nodes
-  /// that start before it but reach up to `to` _will_).
-  skip(to: number) {
-    this.skipTo = to
+  private yieldBuf(i: number) {
+    let {buffer, group} = this.buffer!
+    return this.yield(group.types[buffer[i]], this.bufStart + buffer[i + 1], this.bufStart + buffer[i + 2])
   }
 
-  /// Returns the iterator itself.
-  next(): TreeIterator {
-    if (this.start < 0) {
-      if (this.start == -1) return this
-      // Special case yielding the tree at start of tree iteration
-      let start = this.offset[0], end = start + this.trees[0].length
-      if (this.skipTo <= end) return this.yield(true, this.trees[0].type, start, end)
-    }
-
-    for (;;) {
-      let i = this.index.length - 1
-      if (i < 0) { this.start = -1; return this }
-      let index = this.index[i]
-      if (this.buffer) {
-        let buf = this.buffer.buffer
-        if (i >= this.trees.length && this.bufIndex == buf[index + 3]) { // End of current node
-          this.index.pop()
-          if (this.returnEnd)
-            return this.yield(false, this.buffer.group.types[buf[index]],
-                              buf[index + 1] + this.bufOffset,
-                              buf[index + 2] + this.bufOffset)
-        } else if (this.bufIndex == buf.length) { // End of buffer
-          this.buffer = null
-        } else {
-          let end = buf[this.bufIndex + 2] + this.bufOffset
-          if (end >= this.skipTo) {
-            this.index.push(this.bufIndex)
-            this.bufIndex += 4
-            return this.yield(true, this.buffer.group.types[buf[this.bufIndex - 4]],
-                              buf[this.bufIndex - 3] + this.bufOffset, end)
-          } else {
-            this.bufIndex = buf[this.bufIndex + 3]
-          }
-        }
-      } else {
-        let tree = this.trees[i]
-        if (index == tree.children.length) {
-          let tree = this.trees.pop()!
-          this.index.pop()
-          let offset = this.offset.pop()!
-          if (this.returnEnd)
-            return this.yield(false, tree.type, offset, offset + tree.length)
-        } else {
-          let next = tree.children[index]
-          this.index[i]++
-          if (next instanceof TreeBuffer) {
-            this.buffer = next
-            this.bufOffset = this.offset[i] + tree.positions[index]
-            this.bufIndex = 0
-          } else {
-            let start = this.offset[i] + tree.positions[index], end = start + next.length
-            if (end >= this.skipTo) {
-              this.trees.push(next)
-              this.index.push(0)
-              this.offset.push(start)
-              if (next.type.name) return this.yield(true, next.type, start, start + next.length)
-            }
-          }
-        }
+  private childAfter(parent: NodeSubtree, i: number): boolean {
+    for (let {children, positions} = parent.node; i < children.length; i++) {
+      let next = children[i], start = positions[i] + parent.start
+      if (next instanceof TreeBuffer) {
+        this.buffer = next
+        this.node = parent
+        this.bufStart = start
+        this.bufPos = 0
+        this.bufIndex = i
+        return this.yieldBuf(i)
+      } else if (next.type.name || hasChild(next)) {
+        this.buffer = null
+        this.node = new NodeSubtree(next, start, i, parent)
+        if (!next.type.name) return this.firstChild()
+        return this.yield(next.type, start, start + next.length)
       }
     }
+    return parent.type.name || !parent.parent ? false : this.childAfter(parent.parent, parent.index + 1)
   }
 
-  subtree() {
-    if (!this.open || this.start < 0) throw new Error("Can only take a subtree when the iterator is at an open token")
-    let tree = this.baseSubtree, i = this.index.length - 1
-    scanUp: for (; i >= 0; i--) {
-      if (i >= this.trees.length) { // In a buffer
-        while (tree instanceof BufferSubtree) {
-          if (tree.buffer == this.buffer) {
-            if (tree.index == this.index[i]) { i++; break scanUp }
-            if (tree.index < this.index[i]) continue scanUp
-          }
-          tree = tree.parent!
-        }
-      } else {
-        let node = this.trees[i]
-        while (tree instanceof BufferSubtree) tree = tree.parent!
-        while (tree instanceof NodeSubtree) {
-          if (tree.node == node) { i++; break scanUp }
-          if (tree.start < this.offset[i] || tree.node.length > node.length) continue scanUp
-          tree = tree.parent!
-        }
-        if (tree == node) { i++; break }
-      }
-    }
-    for (; i < this.trees.length; i++)
-      tree = new NodeSubtree(this.trees[i], this.offset[i], tree)
-    for (; i < this.index.length; i++)
-      tree = new BufferSubtree(this.buffer!, this.bufOffset, this.index[i], tree)
-    return this.baseSubtree = tree
-  }
-
-  /// Leaves the current node, moving the cursor to point at the next
-  /// element. This is only clearly defined when `this.open` is true.
-  leave() {
-    if (this.buffer && this.index.length > this.trees.length) {
-      let index = this.index.pop()!
-      this.bufIndex = this.buffer.buffer[index + 3]
+  firstChild() {
+    if (this.buffer) {
+      let next = this.bufPos + 4, end = this.buffer.buffer[this.bufPos + 3]
+      if (end == next) return false
+      this.bufPos = next
+      return this.yieldBuf(next)
     } else {
-      this.trees.pop()
-      this.index.pop()
-      this.offset.pop()
+      return this.childAfter(this.node, 0)
     }
-    return this.next()
   }
-}
 
-function nextPos(pos: TreePosition | BufferPosition) {
-  for (;;) {
-    let next = pos.firstChild()
-    for (let cur: TreePosition | BufferPosition | null = pos; !next && cur; cur = cur.up())
-      next = cur.nextSibling()
-    if (!next || next.type.name) return next
-    pos = next
+  up() {
+    let scan: NodeSubtree | null
+    if (this.buffer) {
+      if (!this.bufStack.length) {
+        scan = this.node
+      } else {
+        this.bufPos = this.bufStack.pop()!
+        return this.yieldBuf(this.bufPos)
+      }
+    } else {
+      scan = this.node.parent
+    }
+    for (;; scan = scan.parent) {
+      if (!scan) return false
+      if (scan.type.name) {
+        this.buffer = null
+        this.node = scan
+        return this.yield(scan.type, scan.start, scan.end)
+      }
+    }
+  }
+
+  nextSibling() {
+    if (!this.buffer)
+      return this.node.parent ? this.childAfter(this.node.parent, this.node.index + 1) : false
+
+    let {buffer} = this.buffer
+    let after = buffer[this.bufPos + 3], d = this.bufStack.length - 1
+    let end = d < 0 ? buffer.length : buffer[this.bufStack[d] + 3]
+    if (after < end) {
+      this.bufPos = after
+      return this.yieldBuf(after)
+    } else if (d >= 0) {
+      return false
+    } else {
+      return this.childAfter(this.node, this.bufIndex + 1)
+    }
+  }
+
+  next() { // FIXME has side effect even when failing
+    for (;;) {
+      if (this.firstChild()) return true
+      for (;;) {
+        if (this.nextSibling()) return true
+        if (!this.up()) return false
+      }
+    }
   }
 }
 
 function hasChild(tree: Tree): boolean {
   return tree.children.some(ch => ch.type.name || ch instanceof TreeBuffer || hasChild(ch))
-}
-
-function childAfter(parent: TreePosition, i: number): TreePosition | BufferPosition | null {
-  for (let {children, positions} = parent.tree; i < children.length; i++) {
-    let next = children[i], start = positions[i] + parent.start
-    if (next instanceof TreeBuffer)
-      return new BufferPosition(parent, next, start, i, [], 0)
-    else if (next.type.name || hasChild(next))
-      return new TreePosition(parent, next, start, i)
-  }
-  return parent.type.name || !parent.parent ? null : childAfter(parent.parent, parent.index + 1)
-}
-
-function treeNextSibling(pos: TreePosition | BufferPosition) {
-  return pos.parent ? childAfter(pos.parent, pos.index + 1) : null
-}
-
-function nextNamed(pos: TreePosition | null) {
-  for (;; pos = pos.parent) if (!pos || pos.type.name) return pos
-}
-
-export class TreePosition {
-  constructor(readonly parent: TreePosition | null,
-              readonly tree: Tree,
-              readonly start: number,
-              readonly index: number) {}
-
-  firstChild() { return childAfter(this, 0) }
-
-  up() { return nextNamed(this.parent) }
-
-  nextSibling() { return treeNextSibling(this) }
-
-  next() { return nextPos(this) }
-
-  get type() { return this.tree.type }
-
-  get end() { return this.start + this.tree.length }
-}
-
-export class BufferPosition {
-  constructor(readonly parent: TreePosition | null,
-              readonly buffer: TreeBuffer,
-              readonly bufStart: number,
-              readonly index: number,
-              readonly stack: number[],
-              public bufIndex: number) {}
-
-  firstChild() {
-    let next = this.bufIndex + 4, end = this.buffer.buffer[this.bufIndex + 3]
-    if (end == next) return null
-    this.bufIndex = next
-    return this
-  }
-
-  up() {
-    if (!this.stack.length) return nextNamed(this.parent)
-    this.bufIndex = this.stack.pop()!
-    return this
-  }
-
-  nextSibling() {
-    let {buffer} = this.buffer
-    let after = buffer[this.bufIndex + 3], d = this.stack.length - 1
-    if (d < 0) {
-      if (after == buffer.length) return treeNextSibling(this)
-    } else if (after == buffer[this.stack[d] + 3]) {
-      return null
-    }
-    this.bufIndex = after
-    return this
-  }
-    
-  next() { return nextPos(this) }
-
-  get type() { return this.buffer.group.types[this.buffer.buffer[this.bufIndex]] }
-
-  get start() { return this.bufStart + this.buffer.buffer[this.bufIndex + 1] }
-
-  get end() { return this.bufStart + this.buffer.buffer[this.bufIndex + 2] }
 }
 
 /// This is used by `Tree.build` as an abstraction for iterating over

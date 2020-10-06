@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType, Subtree, BufferPosition, TreePosition} from ".."
+import {Tree, NodeGroup, NodeType, Subtree} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
@@ -25,7 +25,7 @@ function mk(spec: string) {
     }
     pos += m.length
   }
-  return Tree.build({buffer, group, topID: 0, maxBufferLength: 10000, minRepeatType: repeat.id})
+  return Tree.build({buffer, group, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id})
 }
 
 let _recur: Tree | null = null
@@ -106,22 +106,17 @@ describe("resolve", () => {
   })
 })
 
-describe("iteration", () => {
+describe("cursor", () => {
   it("iterates over all nodes", () => {
-    let openCount: Record<string, number> = Object.create(null)
-    let closeCount: Record<string, number> = Object.create(null)
+    let count: Record<string, number> = Object.create(null)
     let pos = 0
-    for (let iter = simple().iter(true); !iter.next().done;) {
-      let [ref, count] = iter.open ? [iter.start, openCount] : [iter.end, closeCount]
-      ist(ref, pos, ">=")
-      pos = ref
-      count[iter.type.name] = (count[iter.type.name] || 0) + 1
+    for (let cur = simple().cursor(), done = false; !done; done = !cur.next()) {
+      ist(cur.start, pos, ">=")
+      pos = cur.start
+      count[cur.type.name] = (count[cur.type.name] || 0) + 1
     }
     let expected = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
-    for (let k of Object.keys(expected)) {
-      ist(openCount[k], expected[k])
-      ist(closeCount[k], expected[k])
-    }
+    for (let k of Object.keys(expected)) ist(count[k], expected[k])
   })
 
   it("can leave nodes", () => {
@@ -147,26 +142,12 @@ describe("iteration", () => {
   it("isn't slow", () => {
     let tree = recur(), t0 = Date.now(), count = 0
     for (let i = 0; i < 20000; i++)
-      for (let iter = tree.iter(); !iter.next().done;) {
-        if (iter.start < 0 || iter.type.name == "WOO") throw new Error("HAY")
+      for (let cur = tree.cursor(), done = false; !done; done = !cur.next()) {
+        if (cur.start < 0 || !cur.type.name) throw new Error("BAD")
         count++
       }
-    console.log(count)
     let perMS = count / (Date.now() - t0)
     console.log("iter", perMS)
-    ist(perMS, 10000, ">")
-  })
-
-  it("positions are slow", () => {
-    let tree = recur(), t0 = Date.now(), count = 0
-    for (let i = 0; i < 20000; i++)
-      for (let c: TreePosition | BufferPosition | null = new TreePosition(null, tree, 0, 0); c; c = c.next()) {
-        if (c.start < 0 || c.type.name == "WOO") throw new Error("HAY")
-        count++
-      }
-    console.log(count)
-    let perMS = count / (Date.now() - t0)
-    console.log("pos", perMS)
     ist(perMS, 10000, ">")
   })
 
@@ -174,10 +155,9 @@ describe("iteration", () => {
     let tree = recur(), t0 = Date.now(), count = 0
     for (let i = 0; i < 20000; i++)
       tree.iterate({enter(t, s) {
-        if (s < 0 || t.name == "WOO") throw new Error("HAY")
+        if (s < 0 || !t.name) throw new Error("HAY")
         count++
       }})
-    console.log(count)
     let perMS = count / (Date.now() - t0)
     console.log("pos", perMS)
     ist(perMS, 10000, ">")
