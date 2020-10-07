@@ -229,7 +229,15 @@ export class NodeGroup {
 /// either be the tree root, or a tagged node.
 export abstract class Subtree {
   /// The subtree's parent. Will be `null` for the root node
-  abstract parent: Subtree | null
+  get parent() {
+    let parent = this.dParent
+    while (parent && !parent.type.name) parent = parent.dParent
+    return parent
+  }
+
+  /// The direct parent, which may not have a name and should be
+  /// hidden from client code. @internal
+  abstract dParent: Subtree | null
 
   /// The node's type
   abstract type: NodeType
@@ -243,14 +251,14 @@ export abstract class Subtree {
   /// The depth (number of parent nodes) of this subtree
   get depth() {
     let d = 0
-    for (let p = this.parent; p; p = p.parent) d++
+    for (let p = this.dParent; p; p = p.dParent) if (p.type.name) d++
     return d
   }
 
   /// The root of the tree that this subtree is part of
   get root(): Tree {
     let cx = this as Subtree
-    while (cx.parent) cx = cx.parent
+    while (cx.dParent) cx = cx.dParent
     return cx as Tree
   }
 
@@ -271,20 +279,20 @@ export abstract class Subtree {
   /// that end at the position, or `1` to enter nodes that start
   /// there.
   resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
-    let result = this.resolveAt(pos)
-    // FIXME this is slightly inefficient in that it scans the result
-    // of resolveAt twice (but further complicating child-finding
-    // logic seems unattractive as well)
-    if (side != 0) for (;;) {
-      let child = (side < 0 ? result.childBefore(pos) : result.childAfter(pos))
-      if (!child || (side < 0 ? child.end : child.start) != pos) break
-      result = child
+    let base: Subtree = this
+    while (base.dParent && (pos < base.start || pos > base.end)) base = base.dParent
+    let cursor = getCachedCursor(base instanceof Tree ? new NodeSubtree(base, 0, 0, null) : base as NodeSubtree | BufferSubtree)
+    enter: for (;;) {
+      if (!cursor.firstChild()) break
+      do {
+        if (side < 1 ? cursor.start >= pos : cursor.start > pos) break
+        if (side > -1 ? cursor.end > pos : cursor.end >= pos) continue enter
+      } while (cursor.nextSibling())
+      cursor.up()
+      break
     }
-    return result
+    return cursor.subtree()
   }
-
-  /// @internal
-  abstract resolveAt(pos: number): Subtree
 
   /// Find the child tree before the given position, if any.
   abstract childBefore(pos: number): Subtree | null
@@ -311,7 +319,7 @@ export abstract class Subtree {
 /// part of this data structure, and can be used (through `resolve`,
 /// for example) to zoom in on any single node.
 export class Tree extends Subtree {
-  parent!: null
+  dParent!: null
 
   /// Construct a new tree. You usually want to go through
   /// [`Tree.build`](#tree.Tree^build) instead.
@@ -442,18 +450,20 @@ export class Tree extends Subtree {
 
   cursor() { return new TreeCursor(new NodeSubtree(this, 0, 0, null)) }
 
-  /// @internal
-  resolveAt(pos: number): Subtree {
+  resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
     if (cacheRoot == this) {
       for (let tree = cached;;) {
-        let next = tree.parent
+        let next = tree.dParent
         if (!next) break
-        if (tree.start < pos && tree.end > pos) return tree.resolve(pos)
+        if ((side < 1 ? next.start < pos : next.start <= pos) &&
+            (side > -1 ? next.end > pos : next.end >= pos))
+          return cached = next.resolve(pos, side)
         tree = next
       }
     }
+    scheduleCacheClear()
     cacheRoot = this
-    return cached = this.resolveInner(pos, 0, new NodeSubtree(this, 0, 0, null))
+    return cached = super.resolve(pos, side)
   }
 
   childBefore(pos: number): Subtree | null {
@@ -490,12 +500,6 @@ export class Tree extends Subtree {
     return null
   }
 
-  /// @internal
-  resolveInner(pos: number, start: number, parent: NodeSubtree): Subtree {
-    let found = this.findChild(pos, 0, start, parent)
-    return found ? found.resolveAt(pos) : parent
-  }
-
   /// Append another tree to this tree. `other` must have empty space
   /// big enough to fit this tree at its start.
   append(other: Tree) {
@@ -515,7 +519,7 @@ export class Tree extends Subtree {
   static build(data: BuildData) { return buildTree(data) }
 }
 
-Tree.prototype.parent = null
+Tree.prototype.dParent = null
 
 /// Options passed to [`Tree.build`](#tree.Tree^build).
 export type BuildData = {
@@ -553,12 +557,6 @@ export type BuildData = {
   /// grammar.
   minRepeatType?: number
 }
-
-// Top-level `resolveAt` calls store their last result here, so that
-// if the next call is near the last, parent trees can be cheaply
-// reused.
-let cacheRoot: Tree = Tree.empty
-let cached: Subtree = Tree.empty
 
 /// Tree buffers contain (type, start, end, endIndex) quads for each
 /// node. In such a buffer, nodes are stored in prefix order (parents
@@ -727,19 +725,13 @@ class NodeSubtree extends Subtree {
   constructor(readonly node: Tree,
               readonly start: number,
               readonly index: number,
-              readonly parent: NodeSubtree | null) {
+              readonly dParent: NodeSubtree | null) {
     super()
   }
 
   get type() { return this.node.type }
 
   get end() { return this.start + this.node.length }
-
-  resolveAt(pos: number): Subtree {
-    if ((pos <= this.start || pos >= this.end) && this.parent)
-      return this.parent.resolveAt(pos)
-    return this.node.resolveInner(pos, this.start, this)
-  }
 
   childBefore(pos: number): Subtree | null {
     return this.node.findChild(pos, -1, this.start, this)
@@ -764,7 +756,7 @@ class BufferSubtree extends Subtree {
   constructor(readonly buffer: TreeBuffer,
               readonly bufferStart: number,
               readonly index: number,
-              readonly parent: Subtree) {
+              readonly dParent: NodeSubtree | BufferSubtree) {
     super()
   }
 
@@ -795,12 +787,6 @@ class BufferSubtree extends Subtree {
 
   cursor() { return new TreeCursor(this) }
 
-  resolveAt(pos: number): Subtree {
-    if (pos <= this.start || pos >= this.end) return this.parent.resolveAt(pos)
-    let found = this.buffer.findIndex(pos, 0, this.bufferStart, this.index + 4, this.endIndex)
-    return found < 0 ? this : new BufferSubtree(this.buffer, this.bufferStart, found, this).resolveAt(pos)
-  }
-
   toString() {
     let result: string[] = []
     this.buffer.childToString(this.index, result)
@@ -809,33 +795,38 @@ class BufferSubtree extends Subtree {
 }
 
 class TreeCursor {
-  node: NodeSubtree
-  buffer: TreeBuffer | null = null
+  node!: NodeSubtree
+  buffer!: TreeBuffer | null
   bufStart = 0
   bufStack: number[] = []
   bufPos = 0
   bufIndex = 0
 
-  type = NodeType.none
-  start = 0
-  end = 0
+  type!: NodeType
+  start!: number
+  end!: number
 
-  cachedTree: NodeSubtree | BufferSubtree
+  cachedTree!: NodeSubtree | BufferSubtree
 
   /// @internal
-  constructor(start: NodeSubtree | BufferSubtree) {
+  constructor(start: NodeSubtree | BufferSubtree) { this.reset(start) }
+
+  /// @internal
+  reset(start: NodeSubtree | BufferSubtree) {
+    while (this.bufStack.length) this.bufStack.pop()
     if (start instanceof BufferSubtree) {
       this.buffer = start.buffer
       this.bufStart = start.bufferStart
-      start = start.parent as NodeSubtree | BufferSubtree
+      start = start.dParent as NodeSubtree | BufferSubtree
       while (start instanceof BufferSubtree) {
         this.bufStack.push(start.index)
-        start = start.parent as NodeSubtree | BufferSubtree
+        start = start.dParent as NodeSubtree | BufferSubtree
       }
       this.bufStack.reverse()
       this.bufIndex = start.node.children.indexOf(this.buffer)
       this.yieldBuf(start.index)
     } else {
+      this.buffer = null
       this.yield(start.type, start.start, start.end)
     }
     this.node = start
@@ -871,7 +862,7 @@ class TreeCursor {
         return this.yield(next.type, start, start + next.length)
       }
     }
-    return parent.type.name || !parent.parent ? false : this.nextChild(parent.parent, parent.index + dir, dir)
+    return parent.type.name || !parent.dParent ? false : this.nextChild(parent.dParent, parent.index + dir, dir)
   }
 
   private enter(dir: 1 | -1) {
@@ -895,9 +886,9 @@ class TreeCursor {
       if (!this.bufStack.length) scan = this.node
       else return this.yieldBuf(this.bufStack.pop()!)
     } else {
-      scan = this.node.parent
+      scan = this.node.dParent
     }
-    for (;; scan = scan.parent) {
+    for (;; scan = scan.dParent) {
       if (!scan) return false
       if (scan.type.name) {
         this.buffer = null
@@ -909,7 +900,7 @@ class TreeCursor {
 
   private sibling(dir: 1 | -1) {
     if (!this.buffer)
-      return this.node.parent ? this.nextChild(this.node.parent, this.node.index + dir, dir) : false
+      return this.node.dParent ? this.nextChild(this.node.dParent, this.node.index + dir, dir) : false
 
     let {buffer} = this.buffer, d = this.bufStack.length - 1
     if (dir < 0) {
@@ -938,9 +929,9 @@ class TreeCursor {
       index = this.bufIndex
       parent = this.node
     } else {
-      ({index, parent} = this.node)
+      ({index, dParent: parent} = this.node)
     }
-    for (; parent; {index, parent} = parent) {
+    for (; parent; {index, dParent: parent} = parent) {
       for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
         if (child.type.name || child instanceof TreeBuffer || hasChild(child)) return false
@@ -970,7 +961,7 @@ class TreeCursor {
         let index = i == this.bufStack.length ? this.bufPos : this.bufStack[i]
         if (cached.index == index) { match = i + 1; break scanUp }
         if (cached.index < index) continue scanUp
-        cached = cached.parent as BufferSubtree | NodeSubtree
+        cached = cached.dParent as BufferSubtree | NodeSubtree
       }
     }
     let result = match < 0 ? this.node : cached
@@ -982,6 +973,37 @@ class TreeCursor {
 
 function hasChild(tree: Tree): boolean {
   return tree.children.some(ch => ch.type.name || ch instanceof TreeBuffer || hasChild(ch))
+}
+
+const emptySubtree = new NodeSubtree(Tree.empty, 0, 0, null)
+
+// Top-level `resolve` calls store their last result here, so that
+// if the next call is near the last, parent trees can be cheaply
+// reused.
+let cacheRoot: Tree = Tree.empty
+let cached: Subtree = emptySubtree
+let cachedCursor = new TreeCursor(emptySubtree)
+
+let scheduledCacheClear = false
+
+function scheduleCacheClear() {
+  if (!scheduledCacheClear) {
+    let value = setTimeout(clearCache, 3000) as any
+    if (typeof value == "object" && value.unref) value.unref()
+  }
+}
+
+function clearCache() {
+  scheduledCacheClear = false
+  cacheRoot = Tree.empty
+  cached = emptySubtree
+  cachedCursor.reset(emptySubtree)
+}
+
+function getCachedCursor(start: NodeSubtree | BufferSubtree) {
+  scheduleCacheClear()
+  cachedCursor.reset(start)
+  return cachedCursor
 }
 
 /// This is used by `Tree.build` as an abstraction for iterating over
