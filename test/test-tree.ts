@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType, Subtree} from ".."
+import {Tree, NodeGroup, NodeType, TreeCursor} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
@@ -53,8 +53,9 @@ describe("resolve", () => {
     ist(tr.start, 1)
     ist(tr.end, 2)
     ist(tr.name, "a")
-    ist(tr.parent!.name, "T")
-    ist(tr.parent!.parent, null)
+    tr = tr.parent()!
+    ist(tr.name, "T")
+    ist(tr.parent(), null)
     tr = simple().resolve(2, 1)
     ist(tr.start, 2)
     ist(tr.end, 3)
@@ -68,13 +69,15 @@ describe("resolve", () => {
     let tr = simple().resolve(10, 1)
     ist(tr.name, "c")
     ist(tr.start, 10)
-    ist(tr.parent!.name, "Br")
-    ist(tr.parent!.parent!.name, "Pa")
-    ist(tr.parent!.parent!.parent!.name, "T")
+    tr = tr.parent()!
+    ist(tr.name, "Br")
+    tr = tr.parent()!
+    ist(tr.name, "Pa")
+    ist(tr.parent()!.name, "T")
   })
 
   it("can resolve into a parent node", () => {
-    let tr = simple().resolve(10).resolve(2)
+    let tr = simple().resolve(10).moveTo(2)
     ist(tr.name, "T")
   })
 
@@ -89,15 +92,15 @@ describe("resolve", () => {
 })
 
 describe("cursor", () => {
-  const simpleCount = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
+  const simpleCount: Record<string, number> = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
 
   it("iterates over all nodes", () => {
     let count: Record<string, number> = Object.create(null)
     let pos = 0
-    for (let cur = simple().cursor(), done = false; !done; done = !cur.next()) {
+    for (let cur: TreeCursor | null = simple().cursor(); cur; cur = cur.next()) {
       ist(cur.start, pos, ">=")
       pos = cur.start
-      count[cur.type.name] = (count[cur.type.name] || 0) + 1
+      count[cur.name] = (count[cur.name] || 0) + 1
     }
     for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
   })
@@ -105,97 +108,45 @@ describe("cursor", () => {
   it("iterates over all nodes in reverse", () => {
     let count: Record<string, number> = Object.create(null)
     let pos = 100
-    for (let cur = simple().cursor(), done = false; !done; done = !cur.prev()) {
+    for (let cur: TreeCursor | null = simple().cursor(); cur; cur = cur.prev()) {
       ist(cur.end, pos, "<=")
       pos = cur.end
-      count[cur.type.name] = (count[cur.type.name] || 0) + 1
+      count[cur.name] = (count[cur.name] || 0) + 1
     }
     for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
   })
 
   it("can leave nodes", () => {
     let cur = simple().cursor()
-    ist(!cur.up())
-    cur.next(); cur.next()
+    ist(!cur.parent())
+    cur = cur.next()!.next()!
     ist(cur.start, 1)
-    ist(cur.up())
+    ist(cur = cur.clone().parent()!)
     ist(cur.start, 0)
-    for (let j = 0; j < 6; j++) cur.next()
+    for (let j = 0; j < 6; j++) cur = cur.next()!
     ist(cur.start, 5)
-    ist(cur.up())
+    ist(cur = cur.clone().parent()!)
     ist(cur.start, 4)
-    ist(cur.up())
+    ist(cur = cur.clone().parent()!)
     ist(cur.start, 0)
-    ist(!cur.up())
+    ist(!cur.parent())
   })
 
   it("can move to a given position", () => {
-    let tree = recur(), start = tree.length >> 1, cursor = tree.cursor().moveTo(start, 1)
+    let tree = recur(), start = tree.length >> 1, cursor: TreeCursor | null = tree.cursor().moveTo(start, 1)
     do { ist(cursor.start, start, ">=") }
-    while (cursor.next())
+    while (cursor = cursor.next())
   })
 
   it("isn't slow", () => {
     let tree = recur(), t0 = Date.now(), count = 0
     for (let i = 0; i < 2000; i++)
-      for (let cur = tree.cursor(), done = false; !done; done = !cur.next()) {
-        if (cur.start < 0 || !cur.type.name) throw new Error("BAD")
+      for (let cur: TreeCursor | null = tree.cursor(); cur; cur = cur.next()) {
+        if (cur.start < 0 || !cur.name) throw new Error("BAD")
         count++
       }
     let perMS = count / (Date.now() - t0)
+    console.log(perMS, "/ms")
     ist(perMS, 10000, ">")
-  })
-
-  it("can produce subtrees", () => {
-    let tree: Subtree
-    for (let cur = simple().cursor(), done = false; !done; done = !cur.next()) {
-      if (cur.start == 8) { tree = cur.subtree(); break }
-    }
-    ist(tree.name, "Br")
-    ist(tree.start, 8)
-    ist(tree.parent!.name, "Pa")
-    ist(tree.parent!.start, 4)
-    ist(tree.parent!.parent!.name, "T")
-    ist(tree.parent!.parent!.start, 0)
-    ist(tree.parent!.parent!.parent, null)
-  })
-
-  it("can produce subtrees from iterators created from buffer subtrees", () => {
-    let tree: Subtree
-    for (let cur = simple().resolve(8).cursor(), done = false; !done; done = !cur.next()) {
-      if (cur.start == 10) { tree = cur.subtree(); break }
-    }
-    ist(tree.name, "c")
-    ist(tree.start, 10)
-    ist(tree.parent!.name, "Br")
-    ist(tree.parent!.start, 8)
-    ist(tree.parent!.parent!.name, "Pa")
-    ist(tree.parent!.parent!.start, 4)
-  })
-
-  it("can produce subtrees from iterators created from node subtrees", () => {
-    let tree: Subtree
-    for (let cur = simple().resolve(2).cursor(), done = false; !done; done = !cur.next()) {
-      if (cur.start == 4) { tree = cur.subtree(); break }
-    }
-    ist(tree.name, "Pa")
-    ist(tree.start, 4)
-    ist(tree.parent!.name, "T")
-    ist(tree.parent!.start, 0)
-    ist(tree.parent!.parent, null)
-  })
-
-  it("reuses parent subtrees for multiple subtree queries", () => {
-    let cur = simple().cursor()
-    while (cur.start < 10) cur.next()
-    let tr10 = cur.subtree()
-    ist(cur.subtree(), tr10)
-    cur.next()
-    ist(cur.subtree().start, 11)
-    ist(cur.subtree().parent, tr10.parent)
-    while (cur.start < 13) cur.next()
-    ist(cur.subtree().start, 13)
-    ist(cur.subtree().name, "Br")
-    ist(cur.subtree().parent, tr10.parent!.parent)
   })
 })

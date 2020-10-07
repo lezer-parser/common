@@ -179,60 +179,81 @@ export class NodeGroup {
   }
 }
 
-/// A subtree is a representation of part of the syntax tree. It may
-/// either be the tree root, or a tagged node.
-export abstract class Subtree {
-  /// The subtree's parent. Will be `null` for the root node
-  get parent() {
-    let parent = this.dParent
-    while (parent && !parent.type.name) parent = parent.dParent
-    return parent
-  }
-
-  /// The direct parent, which may not have a name and should be
-  /// hidden from client code. @internal
-  abstract dParent: Subtree | null
-
+/// A cursor object focuses on a given node in a syntax tree, and
+/// allows you to move to adjacent nodes.
+///
+/// **Note:** The interface for the cursor-motion methods
+/// (`firstChild`, `nextSibling`, `parent`, `next`, etc) is slightly
+/// tricky. When they return null, the original object is unchanged.
+/// But when they return a cursor value, there is no guarantee about
+/// what happened to the original object—it might be unchanged, or it
+/// might be updated and returned as the position, depending on
+/// implementation details. So if you want to keep track of a given
+/// cursor position, [clone](#tree.TreeCursor.clone) it before moving
+/// forward.
+export interface TreeCursor {
   /// The node's type
-  abstract type: NodeType
+  type: NodeType
+
   // Shorthand for `.type.name`.
-  get name() { return this.type.name }
+  name: string
+
   /// The start source offset of this subtree
-  abstract start: number
+  start: number
+
   /// The end source offset
-  abstract end: number
+  end: number
 
-  /// The depth (number of parent nodes) of this subtree
-  get depth() {
-    let d = 0
-    for (let p = this.dParent; p; p = p.dParent) if (p.type.name) d++
-    return d
-  }
+  /// The depth (number of named parent nodes) of this node.
+  depth: number
 
-  /// The root of the tree that this subtree is part of
-  get root(): Tree {
-    let cx = this as Subtree
-    while (cx.dParent) cx = cx.dParent
-    return cx as Tree
-  }
+  /// The root of the tree that this cursor points into.
+  root: Tree
 
   /// @internal
-  abstract toString(): string
+  toString(): string
 
-  abstract cursor(): TreeCursor
+  /// Create a copy of this cursor. Can be useful when you need to
+  /// keep track of a given node, but also to iterate further from it.
+  clone(): TreeCursor
 
-  /// Find the node at a given position. By default, this will return
-  /// the lowest-depth subtree that covers the position from both
-  /// sides, meaning that nodes starting or ending at the position
-  /// aren't entered. You can pass a `side` of `-1` to enter nodes
-  /// that end at the position, or `1` to enter nodes that start
-  /// there.
-  resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
-    let base: Subtree = this
-    while (base.dParent && (pos < base.start || pos > base.end)) base = base.dParent
-    return getTempCursor(base instanceof Tree ? new NodeSubtree(base, 0, 0, null) : base as NodeSubtree | BufferSubtree)
-      .moveTo(pos, side).subtree()
-  }
+  /// Get the first child of this node, if any. _Might_ (but is not
+  /// guaranteed to) mutate the current object. The returned value, if
+  /// any, is a cursor pointing at the child.
+  firstChild(): TreeCursor | null
+
+  /// Get a cursor pointing at the last child of this node, if any.
+  lastChild(): TreeCursor | null
+
+  /// Move to this node's next sibling, if any.
+  nextSibling(): TreeCursor | null
+
+  /// Move to this node's previous sibling, if any.
+  prevSibling(): TreeCursor | null
+
+  /// Move the node's parent node, if this isn't the top node.
+  parent(): TreeCursor | null
+
+  /// Move the cursor to the innermost node that covers `pos`. If
+  /// `side` is -1, it will enter nodes that end at `pos`. If it is 1,
+  /// it will enter nodes that start at `pos`.
+  moveTo(pos: number, side?: -1 | 0 | 1): TreeCursor
+
+  /// Move to the next node in a
+  /// [pre-order](https://en.wikipedia.org/wiki/Tree_traversal#Pre-order_(NLR))
+  /// traversal, going from a node to its first child or, if the
+  /// current node is empty, its next sibling or the next sibling of
+  /// the first parent node that has one.
+  next(): TreeCursor | null
+
+  /// Move to the next node in a last-to-first pre-order traveral. A
+  /// node is followed by ist last child or, if it has none, its
+  /// previous sibling or the previous sibling of the first parent
+  /// node that has one.
+  prev(): TreeCursor | null
+
+  /// @internal
+  atLastNode(dir: -1 | 1): boolean
 }
 
 /// A piece of syntax tree. There are two ways to approach these
@@ -245,12 +266,10 @@ export abstract class Subtree {
 ///
 /// However, when you want to actually work with tree nodes, this
 /// representation is very awkward, so most client code will want to
-/// use the `Subtree` interface instead, which provides a view on some
-/// part of this data structure, and can be used (through `resolve`,
-/// for example) to zoom in on any single node.
-export class Tree extends Subtree {
-  dParent!: null
-
+/// use the `TreeCursor` interface instead, which provides a view on
+/// some part of this data structure, and can be used to move around
+/// to adjacent nodes.
+export class Tree {
   /// Construct a new tree. You usually want to go through
   /// [`Tree.build`](#tree.Tree^build) instead.
   constructor(
@@ -264,19 +283,13 @@ export class Tree extends Subtree {
     readonly positions: readonly number[],
     /// The total length of this tree
     readonly length: number
-  ) {
-    super()
-  }
-
-  get start() { return 0 }
-
-  get end() { return this.length }
+  ) {}
 
   /// @internal
   toString(): string {
     let children = this.children.map(c => c.toString()).join()
-    return !this.name ? children :
-      (/\W/.test(this.name) && !this.type.prop(NodeProp.error) ? JSON.stringify(this.name) : this.name) +
+    return !this.type.name ? children :
+      (/\W/.test(this.type.name) && !this.type.prop(NodeProp.error) ? JSON.stringify(this.type.name) : this.type.name) +
       (children.length ? "(" + children + ")" : "")
   }
 
@@ -306,9 +319,10 @@ export class Tree extends Subtree {
     let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
 
     function cutAt(tree: Tree, pos: number, side: -1 | 1) {
-      let cursor = getTempCursor(new NodeSubtree(tree, 0, 0, null)).moveTo(pos, -side as 1 | -1)
+      let cursor: TreeCursor | null = tree.cursor()
       for (;;) {
-        if (!(side < 0 ? cursor.prev() : cursor.next())) return side < 0 ? 0 : tree.length
+        cursor = side < 0 ? cursor.prev() : cursor.next()
+        if (!cursor) return side < 0 ? 0 : tree.length
         if ((side < 0 ? cursor.end <= pos : cursor.start >= pos) && !cursor.type.prop(NodeProp.error))
           return side < 0 ? Math.min(pos, cursor.end - 1) : Math.max(pos, cursor.start + 1)
       }
@@ -343,13 +357,14 @@ export class Tree extends Subtree {
   /// The empty tree
   static empty = new Tree(NodeType.none, [], [], 0)
 
-  cursor() { return new TreeCursor(new NodeSubtree(this, 0, 0, null)) }
+  /// Get a [tree cursor](#tree.TreeCursor) rooted at this tree.
+  cursor(): TreeCursor { return new NodeCursor(this, 0, 0, null) }
 
-  resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
-    if (cacheRoot == this) return cached = cached.resolve(pos, side)
+  resolve(pos: number, side: -1 | 0 | 1 = 0): TreeCursor {
+    if (cacheRoot == this) return cachedCursor = cachedCursor.clone().moveTo(pos, side)
     scheduleCacheClear()
     cacheRoot = this
-    return cached = super.resolve(pos, side)
+    return cachedCursor = this.cursor().moveTo(pos, side)
   }
 
   /// Append another tree to this tree. `other` must have empty space
@@ -371,10 +386,7 @@ export class Tree extends Subtree {
   static build(data: BuildData) { return buildTree(data) }
 }
 
-Tree.prototype.dParent = null
-
-/// Options passed to [`Tree.build`](#tree.Tree^build).
-export type BuildData = {
+type BuildData = {
   /// The buffer or buffer cursor to read the node data from.
   ///
   /// When this is an array, it should contain four values for every
@@ -475,182 +487,70 @@ export class TreeBuffer {
   }
 }
 
-class NodeSubtree extends Subtree {
+// A tree cursor pointing at a `Tree` node. These form a linked list
+// back to the root of the tree, and are not mutated after being
+// created (the cursor-motion methods always return a new cursor
+// object).
+class NodeCursor implements TreeCursor {
   constructor(readonly node: Tree,
               readonly start: number,
               readonly index: number,
-              readonly dParent: NodeSubtree | null) {
-    super()
-  }
+              readonly above: NodeCursor | null) {}
 
   get type() { return this.node.type }
+
+  get name() { return this.node.type.name }
 
   get end() { return this.start + this.node.length }
 
   toString() { return this.node.toString() }
 
-  cursor() { return new TreeCursor(this) }
-}
-
-class BufferSubtree extends Subtree {
-  constructor(readonly buffer: TreeBuffer,
-              readonly bufferStart: number,
-              readonly index: number,
-              readonly dParent: NodeSubtree | BufferSubtree) {
-    super()
+  get root() {
+    let cur: NodeCursor = this
+    while (cur.above) cur = cur.above
+    return cur.node
   }
 
-  get type() { return this.buffer.group.types[this.buffer.buffer[this.index]] }
-  get start() { return this.buffer.buffer[this.index + 1] + this.bufferStart }
-  get end() { return this.buffer.buffer[this.index + 2] + this.bufferStart }
-
-  cursor() { return new TreeCursor(this) }
-
-  toString() {
-    let result: string[] = []
-    this.buffer.childToString(this.index, result)
-    return result.join("")
-  }
-}
-
-class TreeCursor {
-  node!: NodeSubtree
-  buffer!: TreeBuffer | null
-  bufStart = 0
-  bufStack: number[] = []
-  bufPos = 0
-  bufIndex = 0
-
-  type!: NodeType
-  start!: number
-  end!: number
-
-  cachedTree!: NodeSubtree | BufferSubtree
-
-  /// @internal
-  constructor(start: NodeSubtree | BufferSubtree) { this.reset(start) }
-
-  /// @internal
-  reset(start: NodeSubtree | BufferSubtree) {
-    while (this.bufStack.length) this.bufStack.pop()
-    if (start instanceof BufferSubtree) {
-      this.buffer = start.buffer
-      this.bufStart = start.bufferStart
-      start = start.dParent as NodeSubtree | BufferSubtree
-      while (start instanceof BufferSubtree) {
-        this.bufStack.push(start.index)
-        start = start.dParent as NodeSubtree | BufferSubtree
-      }
-      this.bufStack.reverse()
-      this.bufIndex = start.node.children.indexOf(this.buffer)
-      this.yieldBuf(start.index)
-    } else {
-      this.buffer = null
-      this.yield(start.type, start.start, start.end)
-    }
-    this.node = start
-    this.cachedTree = start
+  get depth() {
+    let cur: NodeCursor = this, d = 1
+    while (cur.above) { if (cur.name) d++; cur = cur.above }
+    return d
   }
 
-  private yield(type: NodeType, start: number, end: number) {
-    this.type = type
-    this.start = start
-    this.end = end
-    return true
-  }
+  clone() { return this }
 
-  private yieldBuf(i: number) {
-    this.bufPos = i
-    let {buffer, group} = this.buffer!
-    return this.yield(group.types[buffer[i]], this.bufStart + buffer[i + 1], this.bufStart + buffer[i + 2])
-  }
-
-  private nextChild(parent: NodeSubtree, i: number, dir: 1 | -1): boolean {
-    for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
-      let next = children[i], start = positions[i] + parent.start
+  nextChild(i: number, dir: 1 | -1): TreeCursor | null {
+    for (let {children, positions} = this.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
+      let next = children[i], start = positions[i] + this.start
       if (next instanceof TreeBuffer) {
-        this.buffer = next
-        this.node = parent
-        this.bufStart = start
-        this.bufIndex = i
-        return this.yieldBuf(dir < 0 ? this.buffer.childBefore(this.buffer.buffer.length, 0) : 0)
+        return new BufCursor(next, start, i, this, [], dir < 0 ? next.childBefore(next.buffer.length, 0) : 0)
       } else if (next.type.name || hasChild(next)) {
-        this.buffer = null
-        this.node = new NodeSubtree(next, start, i, parent)
-        if (!next.type.name) return this.enter(dir)
-        return this.yield(next.type, start, start + next.length)
+        let inner = new NodeCursor(next, start, i, this)
+        return inner.name ? inner : (dir < 0 ? inner.lastChild() : inner.firstChild())
       }
     }
-    return parent.type.name || !parent.dParent ? false : this.nextChild(parent.dParent, parent.index + dir, dir)
+    return this.name || !this.above ? null : this.above.nextChild(this.index + dir, dir)
   }
 
-  private enter(dir: 1 | -1) {
-    if (this.buffer) {
-      let nodeStart = this.bufPos + 4, nodeEnd = this.buffer.buffer[this.bufPos + 3]
-      if (nodeStart == nodeEnd) return false
-      this.bufStack.push(this.bufPos)
-      return this.yieldBuf(dir < 0 ? this.buffer.childBefore(nodeEnd, nodeStart) : nodeStart)
-    } else {
-      return this.nextChild(this.node, dir < 0 ? this.node.node.children.length - 1 : 0, dir)
-    }
+  firstChild() { return this.nextChild(0, 1) }
+  lastChild() { return this.nextChild(this.node.children.length - 1, -1) }
+
+  nextSibling() { return this.above ? this.above.nextChild(this.index + 1, 1) : null }
+  prevSibling() { return this.above ? this.above.nextChild(this.index - 1, -1) : null }
+
+  parent() {
+    let parent = this.above
+    while (parent && !parent.name) parent = parent.above
+    return parent
   }
 
-  firstChild() { return this.enter(1) }
+  next() { return cursorNext(this, 1) }
+  prev() { return cursorNext(this, -1) }
 
-  lastChild() { return this.enter(-1) }
+  moveTo(pos: number, side: -1 | 0 | 1 = 0) { return moveCursor(this, pos, side) }
 
-  up() {
-    let scan: NodeSubtree | null
-    if (this.buffer) {
-      if (!this.bufStack.length) scan = this.node
-      else return this.yieldBuf(this.bufStack.pop()!)
-    } else {
-      scan = this.node.dParent
-    }
-    for (;; scan = scan.dParent) {
-      if (!scan) return false
-      if (scan.type.name) {
-        this.buffer = null
-        this.node = scan
-        return this.yield(scan.type, scan.start, scan.end)
-      }
-    }
-  }
-
-  private sibling(dir: 1 | -1) {
-    if (!this.buffer)
-      return this.node.dParent ? this.nextChild(this.node.dParent, this.node.index + dir, dir) : false
-
-    let {buffer} = this.buffer, d = this.bufStack.length - 1
-    if (dir < 0) {
-      let parentStart = d < 0 ? 0 : this.bufStack[d] + 4
-      if (this.bufPos != parentStart)
-        return this.yieldBuf(this.buffer.childBefore(this.bufPos, parentStart))
-    } else {
-      let after = buffer[this.bufPos + 3]
-      if (after < (d < 0 ? buffer.length : buffer[this.bufStack[d] + 3])) return this.yieldBuf(after)
-    }
-    return d >= 0 ? false : this.nextChild(this.node, this.bufIndex + dir, dir)
-  }
-
-  nextSibling() { return this.sibling(1) }
-
-  previousSibling() { return this.sibling(-1) }
-
-  private atLastNode(dir: 1 | -1) {
-    let index, parent: NodeSubtree | null
-    if (this.buffer) {
-      if (dir > 0) {
-        if (this.bufPos < this.buffer.buffer.length) return false
-      } else {
-        for (let i = 0; i < this.bufPos; i++) if (this.buffer.buffer[i + 3] < this.bufPos) return false
-      }
-      index = this.bufIndex
-      parent = this.node
-    } else {
-      ({index, dParent: parent} = this.node)
-    }
-    for (; parent; {index, dParent: parent} = parent) {
+  isLastNode(index: number, dir: -1 | 1) {
+    for (let parent: NodeCursor | null = this; parent; {index, above: parent} = parent) {
       for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
         if (child.type.name || child instanceof TreeBuffer || hasChild(child)) return false
@@ -659,53 +559,137 @@ class TreeCursor {
     return true
   }
 
-  private move(dir: 1 | -1) {
-    if (this.enter(dir)) return true
-    for (;;) {
-      if (this.sibling(dir)) return true
-      if (this.atLastNode(dir) || !this.up()) return false
-    }
+  atLastNode(dir: -1 | 1) {
+    return this.above ? this.above.isLastNode(this.index, dir) : true
+  }
+}
+
+// A cursor position in a TreeBuffer. These are mutable, for
+// performance reasons, and update as they move. Not to be confused
+// with the exported interface `BufferCursor`, which serves an
+// entirely different role.
+class BufCursor implements TreeCursor {
+  index!: number
+  type!: NodeType
+  start!: number
+  end!: number
+
+  constructor(readonly buffer: TreeBuffer,
+              readonly bufferStart: number,
+              readonly parentIndex: number,
+              readonly above: NodeCursor,
+              readonly stack: number[],
+              index: number) {
+    this.goto(index)
   }
 
-  next() { return this.move(1) }
-
-  prev() { return this.move(-1) }
-
-  subtree() {
-    if (!this.buffer) return this.node
-    let cached = this.cachedTree, match = -1
-    scanUp: for (let i = this.bufStack.length; i >= 0; i--) {
-      for (;;) {
-        if (!(cached instanceof BufferSubtree) || cached.buffer != this.buffer) break scanUp
-        let index = i == this.bufStack.length ? this.bufPos : this.bufStack[i]
-        if (cached.index == index) { match = i + 1; break scanUp }
-        if (cached.index < index) continue scanUp
-        cached = cached.dParent as BufferSubtree | NodeSubtree
-      }
-    }
-    let result = match < 0 ? this.node : cached
-    for (let i = match < 0 ? 0 : match; i <= this.bufStack.length; i++)
-      result = new BufferSubtree(this.buffer, this.bufStart, i == this.bufStack.length ? this.bufPos : this.bufStack[i], result)
-    return this.cachedTree = result
-  }
-
-  moveTo(pos: number, side: -1 | 0 | 1) {
-    // Move up to a node that actually holds the position, if possible
-    while ((side < 1 ? this.start >= pos : this.start > pos) ||
-           (side > -1 ? this.end <= pos : this.end < pos))
-      if (!this.up()) break
-
-    // Then scan down into child nodes as far as possible
-    enter: for (;;) {
-      if (!this.firstChild()) break
-      do {
-        if (side < 1 ? this.start >= pos : this.start > pos) break
-        if (side > -1 ? this.end > pos : this.end >= pos) continue enter
-      } while (this.nextSibling())
-      this.up()
-      break
-    }
+  private goto(index: number) {
+    this.index = index
+    let {buffer} = this.buffer
+    this.type = this.buffer.group.types[buffer[index]]
+    this.start = this.bufferStart + buffer[index + 1]
+    this.end = this.bufferStart + buffer[index + 2]
     return this
+  }
+
+  get name() { return this.type.name }
+
+  toString() {
+    let result: string[] = []
+    this.buffer.childToString(this.index, result)
+    return result.join("")
+  }
+
+  get root() { return this.above.root }
+
+  get depth() { return this.above.depth + this.stack.length }
+
+  clone() {
+    return new BufCursor(this.buffer, this.bufferStart, this.parentIndex, this.above, this.stack.slice(), this.index)
+  }
+
+  private enter(dir: -1 | 1) {
+    let nodeStart = this.index + 4, nodeEnd = this.buffer.buffer[this.index + 3]
+    if (nodeStart == nodeEnd) return null
+    this.stack.push(this.index)
+    return this.goto(dir < 0 ? this.buffer.childBefore(nodeEnd, nodeStart) : nodeStart)
+  }
+
+  firstChild() { return this.enter(1) }
+  lastChild() { return this.enter(-1) }
+
+  private sibling(dir: 1 | -1) {
+    let d = this.stack.length - 1
+    if (dir < 0) {
+      let parentStart = d < 0 ? 0 : this.stack[d] + 4
+      if (this.index != parentStart)
+        return this.goto(this.buffer.childBefore(this.index, parentStart))
+    } else {
+      let {buffer} = this.buffer, after = buffer[this.index + 3]
+      if (after < (d < 0 ? buffer.length : buffer[this.stack[d] + 3]))
+        return this.goto(after)
+    }
+    return d >= 0 ? null : this.above.nextChild(this.parentIndex + dir, dir)
+  }
+
+  nextSibling() { return this.sibling(1) }
+
+  prevSibling() { return this.sibling(-1) }
+
+  parent() {
+    return this.stack.length ? this.goto(this.stack.pop()!) : this.above.name ? this.above : this.above.parent()
+  }
+
+  next() { return cursorNext(this, 1) }
+  prev() { return cursorNext(this, -1) }
+
+  moveTo(pos: number, side: -1 | 0 | 1 = 0) { return moveCursor(this, pos, side) }
+
+  atLastNode(dir: 1 | -1) {
+    if (dir > 0) {
+      if (this.index < this.buffer.buffer.length) return false
+    } else {
+      for (let i = 0; i < this.index; i++) if (this.buffer.buffer[i + 3] < this.index) return false
+    }
+    return this.above.atLastNode(dir)
+  }
+}
+
+function moveCursor(cursor: TreeCursor, pos: number, side: -1 | 0 | 1) {
+  // Move up to a node that actually holds the position, if possible
+  while ((side < 1 ? cursor.start >= pos : cursor.start > pos) ||
+         (side > -1 ? cursor.end <= pos : cursor.end < pos)) {
+    let above = cursor.parent()
+    if (!above) break
+    cursor = above
+  }
+
+  // Then scan down into child nodes as far as possible
+  enter: for (;;) {
+    let next = cursor.firstChild()
+    if (!next) return cursor
+    do {
+      cursor = next
+      if (side < 1 ? cursor.start >= pos : cursor.start > pos) break
+      if (side > -1 ? cursor.end > pos : cursor.end >= pos)
+        continue enter
+    } while (next = cursor.nextSibling())
+    cursor = cursor.parent()!
+    break
+  }
+  return cursor
+}
+
+function cursorNext(cursor: TreeCursor, dir: -1 | 1) {
+  let inner = dir < 0 ? cursor.lastChild() : cursor.firstChild()
+  if (inner) return inner
+  for (;;) {
+    let sibling = dir < 0 ? cursor.prevSibling() : cursor.nextSibling()
+    if (sibling) return sibling
+    if (cursor.atLastNode(dir)) return null
+    let parent = cursor.parent()
+    if (!parent) return null
+    cursor = parent
   }
 }
 
@@ -713,14 +697,13 @@ function hasChild(tree: Tree): boolean {
   return tree.children.some(ch => ch.type.name || ch instanceof TreeBuffer || hasChild(ch))
 }
 
-const emptySubtree = new NodeSubtree(Tree.empty, 0, 0, null)
+const emptyCursor = new NodeCursor(Tree.empty, 0, 0, null)
 
 // Top-level `resolve` calls store their last result here, so that
 // if the next call is near the last, parent trees can be cheaply
 // reused.
 let cacheRoot: Tree = Tree.empty
-let cached: Subtree = emptySubtree
-let cachedCursor = new TreeCursor(emptySubtree)
+let cachedCursor: TreeCursor = emptyCursor
 
 let scheduledCacheClear = false
 
@@ -734,14 +717,7 @@ function scheduleCacheClear() {
 function clearCache() {
   scheduledCacheClear = false
   cacheRoot = Tree.empty
-  cached = emptySubtree
-  cachedCursor.reset(emptySubtree)
-}
-
-function getTempCursor(start: NodeSubtree | BufferSubtree) {
-  scheduleCacheClear()
-  cachedCursor.reset(start)
-  return cachedCursor
+  cachedCursor = emptyCursor
 }
 
 /// This is used by `Tree.build` as an abstraction for iterating over
