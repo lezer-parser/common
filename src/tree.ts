@@ -710,6 +710,17 @@ export class TreeBuffer {
     }
     return side < 0 ? lastI : -1
   }
+
+  /// Find the last child at the level starting at `parentStart` that
+  /// ends at `pos`. @internal
+  childBefore(pos: number, parentStart: number) {
+    let buf = this.buffer
+    for (let i = parentStart;;) {
+      let curEnd = buf[i + 3]
+      if (curEnd == pos) return i
+      i = curEnd
+    }
+  }
 }
 
 class NodeSubtree extends Subtree {
@@ -813,7 +824,6 @@ class TreeCursor {
   constructor(start: NodeSubtree | BufferSubtree) {
     if (start instanceof BufferSubtree) {
       this.buffer = start.buffer
-      this.bufPos = start.index
       this.bufStart = start.bufferStart
       start = start.parent as NodeSubtree | BufferSubtree
       while (start instanceof BufferSubtree) {
@@ -822,7 +832,7 @@ class TreeCursor {
       }
       this.bufStack.reverse()
       this.bufIndex = start.node.children.indexOf(this.buffer)
-      this.yieldBuf(this.bufIndex)
+      this.yieldBuf(start.index)
     } else {
       this.yield(start.type, start.start, start.end)
     }
@@ -837,50 +847,50 @@ class TreeCursor {
   }
 
   private yieldBuf(i: number) {
+    this.bufPos = i
     let {buffer, group} = this.buffer!
     return this.yield(group.types[buffer[i]], this.bufStart + buffer[i + 1], this.bufStart + buffer[i + 2])
   }
 
-  private childAfter(parent: NodeSubtree, i: number): boolean {
-    for (let {children, positions} = parent.node; i < children.length; i++) {
+  private nextChild(parent: NodeSubtree, i: number, dir: 1 | -1): boolean {
+    for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
       let next = children[i], start = positions[i] + parent.start
       if (next instanceof TreeBuffer) {
         this.buffer = next
         this.node = parent
         this.bufStart = start
-        this.bufPos = 0
         this.bufIndex = i
-        return this.yieldBuf(i)
+        return this.yieldBuf(dir < 0 ? this.buffer.childBefore(this.buffer.buffer.length, 0) : 0)
       } else if (next.type.name || hasChild(next)) {
         this.buffer = null
         this.node = new NodeSubtree(next, start, i, parent)
-        if (!next.type.name) return this.firstChild()
+        if (!next.type.name) return this.enter(dir)
         return this.yield(next.type, start, start + next.length)
       }
     }
-    return parent.type.name || !parent.parent ? false : this.childAfter(parent.parent, parent.index + 1)
+    return parent.type.name || !parent.parent ? false : this.nextChild(parent.parent, parent.index + dir, dir)
   }
 
-  firstChild() {
+  private enter(dir: 1 | -1) {
     if (this.buffer) {
-      let next = this.bufPos + 4, end = this.buffer.buffer[this.bufPos + 3]
-      if (end == next) return false
-      this.bufPos = next
-      return this.yieldBuf(next)
+      let nodeStart = this.bufPos + 4, nodeEnd = this.buffer.buffer[this.bufPos + 3]
+      if (nodeStart == nodeEnd) return false
+      this.bufStack.push(this.bufPos)
+      return this.yieldBuf(dir < 0 ? this.buffer.childBefore(nodeEnd, nodeStart) : nodeStart)
     } else {
-      return this.childAfter(this.node, 0)
+      return this.nextChild(this.node, dir < 0 ? this.node.node.children.length - 1 : 0, dir)
     }
   }
+
+  firstChild() { return this.enter(1) }
+
+  lastChild() { return this.enter(-1) }
 
   up() {
     let scan: NodeSubtree | null
     if (this.buffer) {
-      if (!this.bufStack.length) {
-        scan = this.node
-      } else {
-        this.bufPos = this.bufStack.pop()!
-        return this.yieldBuf(this.bufPos)
-      }
+      if (!this.bufStack.length) scan = this.node
+      else return this.yieldBuf(this.bufStack.pop()!)
     } else {
       scan = this.node.parent
     }
@@ -894,50 +904,59 @@ class TreeCursor {
     }
   }
 
-  nextSibling() {
+  private sibling(dir: 1 | -1) {
     if (!this.buffer)
-      return this.node.parent ? this.childAfter(this.node.parent, this.node.index + 1) : false
+      return this.node.parent ? this.nextChild(this.node.parent, this.node.index + dir, dir) : false
 
-    let {buffer} = this.buffer
-    let after = buffer[this.bufPos + 3], d = this.bufStack.length - 1
-    let end = d < 0 ? buffer.length : buffer[this.bufStack[d] + 3]
-    if (after < end) {
-      this.bufPos = after
-      return this.yieldBuf(after)
-    } else if (d >= 0) {
-      return false
+    let {buffer} = this.buffer, d = this.bufStack.length - 1
+    if (dir < 0) {
+      let parentStart = d < 0 ? 0 : this.bufStack[d] + 4
+      if (this.bufPos != parentStart)
+        return this.yieldBuf(this.buffer.childBefore(this.bufPos, parentStart))
     } else {
-      return this.childAfter(this.node, this.bufIndex + 1)
+      let after = buffer[this.bufPos + 3]
+      if (after < (d < 0 ? buffer.length : buffer[this.bufStack[d] + 3])) return this.yieldBuf(after)
     }
+    return d >= 0 ? false : this.nextChild(this.node, this.bufIndex + dir, dir)
   }
 
-  private atLastNode() {
+  nextSibling() { return this.sibling(1) }
+
+  previousSibling() { return this.sibling(-1) }
+
+  private atLastNode(dir: 1 | -1) {
     let index, parent: NodeSubtree | null
     if (this.buffer) {
-      if (this.bufPos < this.buffer.buffer.length) return false
+      if (dir > 0) {
+        if (this.bufPos < this.buffer.buffer.length) return false
+      } else {
+        for (let i = 0; i < this.bufPos; i++) if (this.buffer.buffer[i + 3] < this.bufPos) return false
+      }
       index = this.bufIndex
       parent = this.node
     } else {
       ({index, parent} = this.node)
     }
     for (; parent; {index, parent} = parent) {
-      for (let i = index; i < parent.node.children.length; i++) {
+      for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
-        if (child.type.name || child instanceof TreeBuffer || hasChild(child)) return true
+        if (child.type.name || child instanceof TreeBuffer || hasChild(child)) return false
       }
     }
-    return false
+    return true
   }
 
-  next() {
+  private move(dir: 1 | -1) {
+    if (this.enter(dir)) return true
     for (;;) {
-      if (this.firstChild()) return true
-      for (;;) {
-        if (this.nextSibling()) return true
-        if (this.atLastNode() || !this.up()) return false
-      }
+      if (this.sibling(dir)) return true
+      if (this.atLastNode(dir) || !this.up()) return false
     }
   }
+
+  next() { return this.move(1) }
+
+  prev() { return this.move(-1) }
 }
 
 function hasChild(tree: Tree): boolean {

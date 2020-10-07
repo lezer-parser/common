@@ -107,6 +107,8 @@ describe("resolve", () => {
 })
 
 describe("cursor", () => {
+  const simpleCount = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
+
   it("iterates over all nodes", () => {
     let count: Record<string, number> = Object.create(null)
     let pos = 0
@@ -115,8 +117,18 @@ describe("cursor", () => {
       pos = cur.start
       count[cur.type.name] = (count[cur.type.name] || 0) + 1
     }
-    let expected = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
-    for (let k of Object.keys(expected)) ist(count[k], expected[k])
+    for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
+  })
+
+  it("iterates over all nodes in reverse", () => {
+    let count: Record<string, number> = Object.create(null)
+    let pos = 100
+    for (let cur = simple().cursor(), done = false; !done; done = !cur.prev()) {
+      ist(cur.end, pos, "<=")
+      pos = cur.end
+      count[cur.type.name] = (count[cur.type.name] || 0) + 1
+    }
+    for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
   })
 
   it("can leave nodes", () => {
