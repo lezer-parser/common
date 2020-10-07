@@ -13,52 +13,6 @@ export interface ChangedRange {
   toB: number
 }
 
-type EnterFunc<T> = (type: NodeType, start: number, end: number) => T | false | undefined
-
-type LeaveFunc = (type: NodeType, start: number, end: number) => void
-
-/// Passed to `Subtree.iterate`.
-type IterateArgs<T> = {
-  /// The function called when entering a node. It is given a node's
-  /// type, start position, and end position, and can return...
-  ///
-  ///  * `undefined` to proceed iterating as normal.
-  ///
-  ///  * `false` to not further iterate this node, but continue
-  ///    iterating nodes after it.
-  ///
-  ///  * Any other value to immediately stop iteration and return that
-  ///    value from the `iterate` method.
-  enter: EnterFunc<T>,
-  /// The function to be called when leaving a node.
-  leave?: LeaveFunc,
-  /// The position in the tree to start iterating. All nodes that
-  /// overlap with this position (including those that start/end
-  /// directly at it) are included in the iteration. Defaults to the
-  /// start of the subtree.
-  from?: number,
-  /// The position in the tree to iterate towards. May be less than
-  /// `from` to perform a reverse iteration. Defaults to the end of
-  /// the subtree.
-  to?: number
-}
-
-class Iteration<T> {
-  result: T | undefined = undefined
-
-  constructor(readonly enter: EnterFunc<T>,
-              readonly leave: LeaveFunc | undefined) {}
-
-  get done() { return this.result !== undefined }
-
-  doEnter(type: NodeType, start: number, end: number) {
-    let value = this.enter(type, start, end)
-    if (value === undefined) return true
-    if (value !== false) this.result = value
-    return false
-  }
-}
-
 let nextPropID = 0
 
 /// Each [node type](#tree.NodeType) can have metadata associated with
@@ -265,11 +219,6 @@ export abstract class Subtree {
   /// @internal
   abstract toString(): string
 
-  /// Iterate over all nodes in this subtree. Will iterate through the
-  /// tree in, calling `args.enter` for each node it enters and, if
-  /// given, `args.leave` when it leaves a node.
-  abstract iterate<T = any>(args: IterateArgs<T>): T | undefined
-
   abstract cursor(): TreeCursor
 
   /// Find the node at a given position. By default, this will return
@@ -281,17 +230,8 @@ export abstract class Subtree {
   resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
     let base: Subtree = this
     while (base.dParent && (pos < base.start || pos > base.end)) base = base.dParent
-    let cursor = getCachedCursor(base instanceof Tree ? new NodeSubtree(base, 0, 0, null) : base as NodeSubtree | BufferSubtree)
-    enter: for (;;) {
-      if (!cursor.firstChild()) break
-      do {
-        if (side < 1 ? cursor.start >= pos : cursor.start > pos) break
-        if (side > -1 ? cursor.end > pos : cursor.end >= pos) continue enter
-      } while (cursor.nextSibling())
-      cursor.up()
-      break
-    }
-    return cursor.subtree()
+    return getTempCursor(base instanceof Tree ? new NodeSubtree(base, 0, 0, null) : base as NodeSubtree | BufferSubtree)
+      .moveTo(pos, side).subtree()
   }
 
   /// Find the child tree before the given position, if any.
@@ -376,17 +316,12 @@ export class Tree extends Subtree {
     let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
 
     function cutAt(tree: Tree, pos: number, side: -1 | 1) {
-      let found = -1
-      tree.iterate({
-        from: pos,
-        to: side < 0 ? 0 : tree.length,
-        enter() { return found < 0 ? undefined : false },
-        leave(type, start, end) {
-          if (found < 0 && (side < 0 ? end <= pos : start >= pos) && !type.prop(NodeProp.error))
-            found = side < 0 ? Math.min(pos, end - 1) : Math.max(pos, start + 1)
-        }
-      })
-      return found > -1 ? found : side < 0 ? 0 : tree.length
+      let cursor = getTempCursor(new NodeSubtree(tree, 0, 0, null)).moveTo(pos, -side as 1 | -1)
+      for (;;) {
+        if (!(side < 0 ? cursor.prev() : cursor.next())) return side < 0 ? 0 : tree.length
+        if ((side < 0 ? cursor.end <= pos : cursor.start >= pos) && !cursor.type.prop(NodeProp.error))
+          return side < 0 ? Math.min(pos, cursor.end - 1) : Math.max(pos, cursor.start + 1)
+      }
     }
 
     let off = 0
@@ -418,49 +353,10 @@ export class Tree extends Subtree {
   /// The empty tree
   static empty = new Tree(NodeType.none, [], [], 0)
 
-  iterate<T = any>({from = this.start, to = this.end, enter, leave}: IterateArgs<T>) {
-    let iter = new Iteration(enter, leave)
-    this.iterInner(from, to, 0, iter)
-    return iter.result
-  }
-
-  /// @internal
-  iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
-    if (this.type.name && !iter.doEnter(this.type, offset, offset + this.length))
-      return
-
-    if (from <= to) {
-      for (let i = 0; i < this.children.length && !iter.done; i++) {
-        let child = this.children[i], start = this.positions[i] + offset, end = start + child.length
-        if (start > to) break
-        if (end < from) continue
-        child.iterInner(from, to, start, iter)
-      }
-    } else {
-      for (let i = this.children.length - 1; i >= 0 && !iter.done; i--) {
-        let child = this.children[i], start = this.positions[i] + offset, end = start + child.length
-        if (end < to) break
-        if (start > from) continue
-        child.iterInner(from, to, start, iter)
-      }
-    }
-    if (iter.leave && this.type.name) iter.leave(this.type, offset, offset + this.length)
-    return
-  }
-
   cursor() { return new TreeCursor(new NodeSubtree(this, 0, 0, null)) }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0): Subtree {
-    if (cacheRoot == this) {
-      for (let tree = cached;;) {
-        let next = tree.dParent
-        if (!next) break
-        if ((side < 1 ? next.start < pos : next.start <= pos) &&
-            (side > -1 ? next.end > pos : next.end >= pos))
-          return cached = next.resolve(pos, side)
-        tree = next
-      }
-    }
+    if (cacheRoot == this) return cached = cached.resolve(pos, side)
     scheduleCacheClear()
     cacheRoot = this
     return cached = super.resolve(pos, side)
@@ -611,87 +507,6 @@ export class TreeBuffer {
     return new TreeBuffer(newBuffer, Math.min(at, this.length), this.group)
   }
 
-  iterate<T = any>({from = 0, to = this.length, enter, leave}: IterateArgs<T>): T | undefined {
-    let iter = new Iteration(enter, leave)
-    this.iterInner(from, to, 0, iter)
-    return iter.result
-  }
-
-  /// @internal
-  iterInner<T>(from: number, to: number, offset: number, iter: Iteration<T>) {
-    if (from <= to) {
-      for (let index = 0; index < this.buffer.length;)
-        index = this.iterChild(from, to, offset, index, iter)
-    } else {
-      this.iterRev(from, to, offset, 0, this.buffer.length, iter)
-    }
-  }
-
-  /// @internal
-  iterChild<T>(from: number, to: number, offset: number, index: number, iter: Iteration<T>) {
-    let type = this.group.types[this.buffer[index++]], start = this.buffer[index++] + offset,
-        end = this.buffer[index++] + offset, endIndex = this.buffer[index++]
-    if (start > to) return this.buffer.length
-    if (end >= from && iter.doEnter(type, start, end)) {
-      while (index < endIndex && !iter.done) index = this.iterChild(from, to, offset, index, iter)
-      if (iter.leave) iter.leave(type, start, end)
-    }
-    return endIndex
-  }
-
-  private parentNodesByEnd(startIndex: number, endIndex: number) {
-    // Build up an array of node indices reflecting the order in which
-    // non-empty nodes end, to avoid having to scan for parent nodes
-    // at every position during reverse iteration.
-    let order: number[] = []
-    let scan = (index: number) => {
-      let end = this.buffer[index + 3]
-      if (end == index + 4) return end
-      for (let i = index + 4; i < end;) i = scan(i)
-      order.push(index)
-      return end
-    }
-    for (let index = startIndex; index < endIndex;) index = scan(index)
-    return order
-  }
-
-  /// @internal
-  iterRev<T>(from: number, to: number, offset: number, startIndex: number, endIndex: number, iter: Iteration<T>) {
-    let endOrder = this.parentNodesByEnd(startIndex, endIndex)
-    // Index range for the next non-empty node
-    let nextStart = -1, nextEnd = -1
-    let takeNext = () => {
-      if (endOrder.length > 0) {
-        nextStart = endOrder.pop()!
-        nextEnd = this.buffer[nextStart + 3]
-      } else {
-        nextEnd = -1
-      }
-    }
-    takeNext()
-
-    run: for (let index = endIndex; index > startIndex && !iter.done;) {
-      while (nextEnd == index) {
-        let base = nextStart
-        let id = this.buffer[base], start = this.buffer[base + 1] + offset, end = this.buffer[base + 2] + offset
-        takeNext()
-        if (start <= from && end >= to) {
-          if (!iter.doEnter(this.group.types[id], start, end)) {
-            // Skip the entire node
-            index = base
-            while (nextEnd > base) takeNext()
-            continue run
-          }
-        }
-      }
-      let endIndex = this.buffer[--index], end = this.buffer[--index] + offset,
-        start = this.buffer[--index] + offset, id = this.buffer[--index]
-      if (start > from || end < to) continue
-      if ((endIndex != index + 4 || iter.doEnter(this.group.types[id], start, end)) && iter.leave)
-        iter.leave(this.group.types[id], start, end)
-    }
-  }
-
   /// @internal
   findIndex(pos: number, side: number, start: number, from: number, to: number) {
     let lastI = -1
@@ -743,12 +558,6 @@ class NodeSubtree extends Subtree {
 
   toString() { return this.node.toString() }
 
-  iterate<T = any>({from = this.start, to = this.end, enter, leave}: IterateArgs<T>) {
-    let iter = new Iteration(enter, leave)
-    this.node.iterInner(from, to, this.start, iter)
-    return iter.result
-  }
-
   cursor() { return new TreeCursor(this) }
 }
 
@@ -774,15 +583,6 @@ class BufferSubtree extends Subtree {
   childAfter(pos: number): Subtree | null {
     let index = this.buffer.findIndex(pos, 1, this.bufferStart, this.index + 4, this.endIndex)
     return index < 0 ? null : new BufferSubtree(this.buffer, this.bufferStart, index, this)
-  }
-
-  iterate<T = any>({from = this.start, to = this.end, enter, leave}: IterateArgs<T>) {
-    let iter = new Iteration(enter, leave)
-    if (from <= to)
-      this.buffer.iterChild(from, to, this.bufferStart, this.index, iter)
-    else
-      this.buffer.iterRev(from, to, this.bufferStart, this.index, this.endIndex, iter)
-    return iter.result
   }
 
   cursor() { return new TreeCursor(this) }
@@ -969,6 +769,25 @@ class TreeCursor {
       result = new BufferSubtree(this.buffer, this.bufStart, i == this.bufStack.length ? this.bufPos : this.bufStack[i], result)
     return this.cachedTree = result
   }
+
+  moveTo(pos: number, side: -1 | 0 | 1) {
+    // Move up to a node that actually holds the position, if possible
+    while ((side < 1 ? this.start >= pos : this.start > pos) ||
+           (side > -1 ? this.end <= pos : this.end < pos))
+      if (!this.up()) break
+
+    // Then scan down into child nodes as far as possible
+    enter: for (;;) {
+      if (!this.firstChild()) break
+      do {
+        if (side < 1 ? this.start >= pos : this.start > pos) break
+        if (side > -1 ? this.end > pos : this.end >= pos) continue enter
+      } while (this.nextSibling())
+      this.up()
+      break
+    }
+    return this
+  }
 }
 
 function hasChild(tree: Tree): boolean {
@@ -1000,7 +819,7 @@ function clearCache() {
   cachedCursor.reset(emptySubtree)
 }
 
-function getCachedCursor(start: NodeSubtree | BufferSubtree) {
+function getTempCursor(start: NodeSubtree | BufferSubtree) {
   scheduleCacheClear()
   cachedCursor.reset(start)
   return cachedCursor
