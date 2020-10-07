@@ -86,24 +86,6 @@ describe("resolve", () => {
   it("caches resolved parents", () => {
     ist(recur().resolve(10, 1).parent, recur().resolve(13, 1).parent)
   })
-
-  it("can take first and last children", () => {
-    let tr = simple().resolve(6)
-    ist(tr.firstChild!.name, "b")
-    ist(tr.firstChild!.start, 5)
-    ist(tr.lastChild!.name, "Br")
-    ist(tr.lastChild!.end, 22)
-  })
-
-  it("can find children at a given position", () => {
-    let tr = simple().resolve(13)
-    ist(tr.childBefore(5), null)
-    ist(tr.childBefore(6)!.name, "b")
-    ist(tr.childBefore(10000)!.name, "Br")
-    ist(tr.childAfter(0)!.name, "b")
-    ist(tr.childAfter(13)!.start, 13)
-    ist(tr.childAfter(22), null)
-  })
 })
 
 describe("cursor", () => {
@@ -147,10 +129,10 @@ describe("cursor", () => {
     ist(!cur.up())
   })
 
-  it.skip("can skip content", () => {
-    let tree = recur(), start = tree.length >> 1, iter = tree.iter()
-    iter.skip(start)
-    for (; !iter.done; iter.next()) ist(iter.end, start, ">=")
+  it("can move to a given position", () => {
+    let tree = recur(), start = tree.length >> 1, cursor = tree.cursor().moveTo(start, 1)
+    do { ist(cursor.start, start, ">=") }
+    while (cursor.next())
   })
 
   it("isn't slow", () => {

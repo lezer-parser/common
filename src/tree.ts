@@ -233,16 +233,6 @@ export abstract class Subtree {
     return getTempCursor(base instanceof Tree ? new NodeSubtree(base, 0, 0, null) : base as NodeSubtree | BufferSubtree)
       .moveTo(pos, side).subtree()
   }
-
-  /// Find the child tree before the given position, if any.
-  abstract childBefore(pos: number): Subtree | null
-  /// Find the child tree after the given position, if any.
-  abstract childAfter(pos: number): Subtree | null
-
-  /// Get the first child of this subtree.
-  get firstChild() { return this.childAfter(this.start - 1) }
-  /// Find the last child of this subtree.
-  get lastChild() { return this.childBefore(this.end + 1) }
 }
 
 /// A piece of syntax tree. There are two ways to approach these
@@ -362,40 +352,6 @@ export class Tree extends Subtree {
     return cached = super.resolve(pos, side)
   }
 
-  childBefore(pos: number): Subtree | null {
-    return this.findChild(pos, -1, 0, new NodeSubtree(this, 0, 0, null))
-  }
-
-  childAfter(pos: number): Subtree | null {
-    return this.findChild(pos, 1, 0, new NodeSubtree(this, 0, 0, null))
-  }
-
-  /// @internal
-  findChild(pos: number, side: number, start: number, parent: NodeSubtree): Subtree | null {
-    for (let i = 0; i < this.children.length; i++) {
-      let childStart = this.positions[i] + start, select = -1
-      if (childStart >= pos) {
-        if (side < 0 && i > 0) select = i - 1
-        else if (side > 0) select = i
-        else break
-      }
-      if (select < 0 && (childStart + this.children[i].length > pos || side < 0 && i == this.children.length - 1))
-        select = i
-      if (select >= 0) {
-        let child = this.children[select], childStart = this.positions[select] + start
-        if (child.length == 0 && childStart == pos) continue
-        if (child instanceof Tree) {
-          if (child.type.name) return new NodeSubtree(child, childStart, select, parent)
-          return child.findChild(pos, side, childStart, parent)
-        } else {
-          let found = child.findIndex(pos, side, childStart, 0, child.buffer.length)
-          if (found > -1) return new BufferSubtree(child, childStart, found, parent)
-        }
-      }
-    }
-    return null
-  }
-
   /// Append another tree to this tree. `other` must have empty space
   /// big enough to fit this tree at its start.
   append(other: Tree) {
@@ -507,23 +463,6 @@ export class TreeBuffer {
     return new TreeBuffer(newBuffer, Math.min(at, this.length), this.group)
   }
 
-  /// @internal
-  findIndex(pos: number, side: number, start: number, from: number, to: number) {
-    let lastI = -1
-    for (let i = from, buf = this.buffer; i < to;) {
-      let start1 = buf[i + 1] + start, end1 = buf[i + 2] + start
-      let ignore = start1 == end1 && start1 == pos
-      if (start1 >= pos) {
-        if (side > 0 && !ignore) return i
-        break
-      }
-      if (end1 > pos) return i
-      if (!ignore) lastI = i
-      i = buf[i + 3]
-    }
-    return side < 0 ? lastI : -1
-  }
-
   /// Find the last child at the level starting at `parentStart` that
   /// ends at `pos`. @internal
   childBefore(pos: number, parentStart: number) {
@@ -548,14 +487,6 @@ class NodeSubtree extends Subtree {
 
   get end() { return this.start + this.node.length }
 
-  childBefore(pos: number): Subtree | null {
-    return this.node.findChild(pos, -1, this.start, this)
-  }
-
-  childAfter(pos: number): Subtree | null {
-    return this.node.findChild(pos, 1, this.start, this)
-  }
-
   toString() { return this.node.toString() }
 
   cursor() { return new TreeCursor(this) }
@@ -572,18 +503,6 @@ class BufferSubtree extends Subtree {
   get type() { return this.buffer.group.types[this.buffer.buffer[this.index]] }
   get start() { return this.buffer.buffer[this.index + 1] + this.bufferStart }
   get end() { return this.buffer.buffer[this.index + 2] + this.bufferStart }
-
-  private get endIndex() { return this.buffer.buffer[this.index + 3] }
-
-  childBefore(pos: number): Subtree | null {
-    let index = this.buffer.findIndex(pos, -1, this.bufferStart, this.index + 4, this.endIndex)
-    return index < 0 ? null : new BufferSubtree(this.buffer, this.bufferStart, index, this)
-  }
-
-  childAfter(pos: number): Subtree | null {
-    let index = this.buffer.findIndex(pos, 1, this.bufferStart, this.index + 4, this.endIndex)
-    return index < 0 ? null : new BufferSubtree(this.buffer, this.bufferStart, index, this)
-  }
 
   cursor() { return new TreeCursor(this) }
 
