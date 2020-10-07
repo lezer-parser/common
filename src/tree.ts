@@ -820,6 +820,8 @@ class TreeCursor {
   start = 0
   end = 0
 
+  cachedTree: NodeSubtree | BufferSubtree
+
   /// @internal
   constructor(start: NodeSubtree | BufferSubtree) {
     if (start instanceof BufferSubtree) {
@@ -837,6 +839,7 @@ class TreeCursor {
       this.yield(start.type, start.start, start.end)
     }
     this.node = start
+    this.cachedTree = start
   }
 
   private yield(type: NodeType, start: number, end: number) {
@@ -957,6 +960,24 @@ class TreeCursor {
   next() { return this.move(1) }
 
   prev() { return this.move(-1) }
+
+  subtree() {
+    if (!this.buffer) return this.node
+    let cached = this.cachedTree, match = -1
+    scanUp: for (let i = this.bufStack.length; i >= 0; i--) {
+      for (;;) {
+        if (!(cached instanceof BufferSubtree) || cached.buffer != this.buffer) break scanUp
+        let index = i == this.bufStack.length ? this.bufPos : this.bufStack[i]
+        if (cached.index == index) { match = i + 1; break scanUp }
+        if (cached.index < index) continue scanUp
+        cached = cached.parent as BufferSubtree | NodeSubtree
+      }
+    }
+    let result = match < 0 ? this.node : cached
+    for (let i = match < 0 ? 0 : match; i <= this.bufStack.length; i++)
+      result = new BufferSubtree(this.buffer, this.bufStart, i == this.bufStack.length ? this.bufPos : this.bufStack[i], result)
+    return this.cachedTree = result
+  }
 }
 
 function hasChild(tree: Tree): boolean {

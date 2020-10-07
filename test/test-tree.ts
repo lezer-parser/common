@@ -132,20 +132,22 @@ describe("cursor", () => {
   })
 
   it("can leave nodes", () => {
-    ist(simple().iter().next().leave().done)
-    let i = simple().iter().next().next().next()
-    ist(i.start, 1)
-    i.leave()
-    ist(i.start, 2)
-    for (let j = 0; j < 6; j++) i.next()
-    ist(i.start, 8)
-    i.leave()
-    ist(i.start, 13)
-    i.leave()
-    ist(i.start, 18)
+    let cur = simple().cursor()
+    ist(!cur.up())
+    cur.next(); cur.next()
+    ist(cur.start, 1)
+    ist(cur.up())
+    ist(cur.start, 0)
+    for (let j = 0; j < 6; j++) cur.next()
+    ist(cur.start, 5)
+    ist(cur.up())
+    ist(cur.start, 4)
+    ist(cur.up())
+    ist(cur.start, 0)
+    ist(!cur.up())
   })
 
-  it("can skip content", () => {
+  it.skip("can skip content", () => {
     let tree = recur(), start = tree.length >> 1, iter = tree.iter()
     iter.skip(start)
     for (; !iter.done; iter.next()) ist(iter.end, start, ">=")
@@ -153,32 +155,19 @@ describe("cursor", () => {
 
   it("isn't slow", () => {
     let tree = recur(), t0 = Date.now(), count = 0
-    for (let i = 0; i < 20000; i++)
+    for (let i = 0; i < 2000; i++)
       for (let cur = tree.cursor(), done = false; !done; done = !cur.next()) {
         if (cur.start < 0 || !cur.type.name) throw new Error("BAD")
         count++
       }
     let perMS = count / (Date.now() - t0)
-    console.log("iter", perMS)
-    ist(perMS, 10000, ">")
-  })
-
-  it("YOU are slow", () => {
-    let tree = recur(), t0 = Date.now(), count = 0
-    for (let i = 0; i < 20000; i++)
-      tree.iterate({enter(t, s) {
-        if (s < 0 || !t.name) throw new Error("HAY")
-        count++
-      }})
-    let perMS = count / (Date.now() - t0)
-    console.log("pos", perMS)
     ist(perMS, 10000, ">")
   })
 
   it("can produce subtrees", () => {
     let tree: Subtree
-    for (let i = simple().iter(); i.next();) {
-      if (i.start == 8) { tree = i.subtree(); break }
+    for (let cur = simple().cursor(), done = false; !done; done = !cur.next()) {
+      if (cur.start == 8) { tree = cur.subtree(); break }
     }
     ist(tree.name, "Br")
     ist(tree.start, 8)
@@ -191,8 +180,8 @@ describe("cursor", () => {
 
   it("can produce subtrees from iterators created from buffer subtrees", () => {
     let tree: Subtree
-    for (let i = simple().resolve(8).iter(); i.next();) {
-      if (i.start == 10) { tree = i.subtree(); break }
+    for (let cur = simple().resolve(8).cursor(), done = false; !done; done = !cur.next()) {
+      if (cur.start == 10) { tree = cur.subtree(); break }
     }
     ist(tree.name, "c")
     ist(tree.start, 10)
@@ -204,8 +193,8 @@ describe("cursor", () => {
 
   it("can produce subtrees from iterators created from node subtrees", () => {
     let tree: Subtree
-    for (let i = simple().resolve(2).iter(); i.next();) {
-      if (i.start == 4) { tree = i.subtree(); break }
+    for (let cur = simple().resolve(2).cursor(), done = false; !done; done = !cur.next()) {
+      if (cur.start == 4) { tree = cur.subtree(); break }
     }
     ist(tree.name, "Pa")
     ist(tree.start, 4)
@@ -215,16 +204,16 @@ describe("cursor", () => {
   })
 
   it("reuses parent subtrees for multiple subtree queries", () => {
-    let i = simple().iter()
-    while (i.start < 10) i.next()
-    let tr10 = i.subtree()
-    ist(i.subtree(), tr10)
-    i.next()
-    ist(i.subtree().start, 11)
-    ist(i.subtree().parent, tr10.parent)
-    while (i.start < 13) i.next()
-    ist(i.subtree().start, 13)
-    ist(i.subtree().name, "Br")
-    ist(i.subtree().parent, tr10.parent!.parent)
+    let cur = simple().cursor()
+    while (cur.start < 10) cur.next()
+    let tr10 = cur.subtree()
+    ist(cur.subtree(), tr10)
+    cur.next()
+    ist(cur.subtree().start, 11)
+    ist(cur.subtree().parent, tr10.parent)
+    while (cur.start < 13) cur.next()
+    ist(cur.subtree().start, 13)
+    ist(cur.subtree().name, "Br")
+    ist(cur.subtree().parent, tr10.parent!.parent)
   })
 })
