@@ -911,12 +911,30 @@ class TreeCursor {
     }
   }
 
-  next() { // FIXME has side effect even when failing
+  private atLastNode() {
+    let index, parent: NodeSubtree | null
+    if (this.buffer) {
+      if (this.bufPos < this.buffer.buffer.length) return false
+      index = this.bufIndex
+      parent = this.node
+    } else {
+      ({index, parent} = this.node)
+    }
+    for (; parent; {index, parent} = parent) {
+      for (let i = index; i < parent.node.children.length; i++) {
+        let child = parent.node.children[i]
+        if (child.type.name || child instanceof TreeBuffer || hasChild(child)) return true
+      }
+    }
+    return false
+  }
+
+  next() {
     for (;;) {
       if (this.firstChild()) return true
       for (;;) {
         if (this.nextSibling()) return true
-        if (!this.up()) return false
+        if (this.atLastNode() || !this.up()) return false
       }
     }
   }
