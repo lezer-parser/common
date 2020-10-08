@@ -244,10 +244,14 @@ export class Tree {
     let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
 
     function cutAt(tree: Tree, pos: number, side: -1 | 1) {
-      for (let cursor: TreeCursor = tree.cursor(pos, -side as -1 | 1);;) {
-        if ((side < 0 ? cursor.to <= pos : cursor.from >= pos) && !cursor.type.prop(NodeProp.error))
-          return side < 0 ? Math.min(pos, cursor.to - 1) : Math.max(pos, cursor.from + 1)
-        if (!(side < 0 ? cursor.prev() : cursor.next())) return side < 0 ? 0 : tree.length
+      let cursor: TreeCursor = tree.cursor(pos, -side as -1 | 1)
+      for (;;) {
+        if (!cursor.enter(side)) for (;;) {
+          if ((side < 0 ? cursor.to <= pos : cursor.from >= pos) && !cursor.type.prop(NodeProp.error))
+            return side < 0 ? Math.min(pos, cursor.to - 1) : Math.max(pos, cursor.from + 1)
+          if (cursor.sibling(side)) break
+          if (!cursor.parent()) return side < 0 ? 0 : tree.length
+        }
       }
     }
 
@@ -536,7 +540,8 @@ export class TreeCursor {
     return parent.node.type.name || !parent.parent ? false : this.nextChild(parent.parent, parent.index + dir, dir)
   }
 
-  private enter(dir: 1 | -1) {
+  /// @internal
+  enter(dir: 1 | -1) {
     if (this.buffer) {
       let nodeStart = this.bufPos + 4, nodeEnd = this.buffer.buffer[this.bufPos + 3]
       if (nodeStart == nodeEnd) return false
@@ -556,16 +561,16 @@ export class TreeCursor {
 
   /// Move the node's parent node, if this isn't the top node.
   parent() {
-    let scan: NodeScope | null
+    let scan: NodeScope
     if (this.buffer) {
       if (!this.bufStack.length) scan = this.node
       else return this.yieldBuf(this.bufStack.pop()!)
     } else {
+      if (!this.node.parent) return false
       scan = this.node.parent
     }
     for (;; scan = scan.parent) {
-      if (!scan) return false
-      if (scan.node.type.name) {
+      if (scan.node.type.name || !scan.parent) {
         this.buffer = null
         this.node = scan
         return this.yield(scan.node.type, scan.from, scan.from + scan.node.length)
@@ -573,7 +578,8 @@ export class TreeCursor {
     }
   }
 
-  private sibling(dir: 1 | -1) {
+  /// @internal
+  sibling(dir: 1 | -1) {
     if (!this.buffer)
       return this.node.parent ? this.nextChild(this.node.parent, this.node.index + dir, dir) : false
 
