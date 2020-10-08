@@ -479,7 +479,7 @@ export class TreeCursor {
 
   /// The depth (number of named parent nodes) of this node.
   get depth() {
-    let depth = this.bufStack.length
+    let depth = this.buffer ? this.bufStack.length + 1 : 0
     for (let n: NodeScope | null = this.node; n; n = n.parent) if (n.node.type.name) depth++
     return depth
   }

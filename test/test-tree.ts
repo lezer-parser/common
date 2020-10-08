@@ -84,7 +84,7 @@ describe("cursor", () => {
 
   it("can resolve in a large tree", () => {
     let c = recur().cursor(10, 1)
-    ist(c.depth, 7)
+    ist(c.depth, 8)
   })
 
   it("caches resolved parents", () => {
