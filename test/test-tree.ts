@@ -117,6 +117,29 @@ describe("cursor", () => {
     for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
   })
 
+  it("works with internal iteration", () => {
+    let openCount: Record<string, number> = Object.create(null)
+    let closeCount: Record<string, number> = Object.create(null)
+    simple().iterate({
+      enter(t) { openCount[t.name] = (openCount[t.name] || 0) + 1 },
+      leave(t) { closeCount[t.name] = (closeCount[t.name] || 0) + 1 }
+    })
+    for (let k of Object.keys(simpleCount)) {
+      ist(openCount[k], simpleCount[k])
+      ist(closeCount[k], simpleCount[k])
+    }
+  })
+
+  it("internal iteration can be limited to a range", () => {
+    let seen: string[] = []
+    simple().iterate({
+      enter(t) { seen.push(t.name); return t.name == "Br" ? false : undefined },
+      from: 3,
+      to: 14
+    })
+    ist(seen.join(","), "T,a,a,Pa,b,b,b,Br,Br")
+  })
+
   it("can leave nodes", () => {
     let cur = simple().cursor()
     ist(!cur.parent())

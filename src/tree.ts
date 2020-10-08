@@ -293,6 +293,29 @@ export class Tree {
     return cursor
   }
 
+  /// Iterate over the tree and its children, calling `enter` for any
+  /// node that touches the `from`/`to` region (if given) before
+  /// running over such a node's children, and `leave` (if given) when
+  /// leaving the node. When `enter` returns `false`, the given node
+  /// will not have its children iterated over (or `leave` called).
+  iterate(spec: {
+    enter(type: NodeType, from: number, to: number): false | void,
+    leave?(type: NodeType, from: number, to: number): void,
+    from?: number,
+    to?: number
+  }) {
+    let {enter, leave, from = 0, to = this.length} = spec
+    for (let c = this.cursor();;) {
+      if (c.from <= to && c.to >= from && (!c.type.name || enter(c.type, c.from, c.to) !== false) && c.firstChild())
+        continue
+      for (;;) {
+        if (leave && c.type.name && c.from <= to && c.to >= from) leave(c.type, c.from, c.to)
+        if (c.nextSibling()) break
+        if (!c.parent()) return
+      }
+    }
+  }
+
   /// Append another tree to this tree. `other` must have empty space
   /// big enough to fit this tree at its start.
   append(other: Tree) {
@@ -422,11 +445,11 @@ class NodeScope {
 
 /// A tree cursor object focuses on a given node in a syntax tree, and
 /// allows you to move to adjacent nodes.
-class TreeCursor {
+export class TreeCursor {
   /// The node's type.
   type!: NodeType
 
-  // Shorthand for `.type.name`.
+  /// Shorthand for `.type.name`.
   get name() { return this.type.name }
 
   /// The start source offset of this node.
