@@ -200,7 +200,7 @@ export class Tree {
   constructor(
     readonly type: NodeType,
     /// The tree's child nodes. Children small enough to fit in a
-    /// `TreeBuffer` will be represented as such, other children can be
+    /// `TreeBuffer will be represented as such, other children can be
     /// further `Tree` instances with their own internal structure.
     readonly children: readonly (Tree | TreeBuffer)[],
     /// The positions (offsets relative to the start of this tree) of
@@ -246,7 +246,7 @@ export class Tree {
     function cutAt(tree: Tree, pos: number, side: -1 | 1) {
       let cursor: TreeCursor = tree.cursor(pos, -side as -1 | 1)
       for (;;) {
-        if (!cursor.enter(side)) for (;;) {
+        if (!cursor.enter(side, pos)) for (;;) {
           if ((side < 0 ? cursor.to <= pos : cursor.from >= pos) && !cursor.type.prop(NodeProp.error))
             return side < 0 ? Math.min(pos, cursor.to - 1) : Math.max(pos, cursor.from + 1)
           if (cursor.sibling(side)) break
@@ -428,15 +428,25 @@ export class TreeBuffer {
     return new TreeBuffer(newBuffer, Math.min(at, this.length), this.group)
   }
 
-  /// Find the last child at the level starting at `parentStart` that
-  /// ends at `pos`. @internal
-  childBefore(pos: number, parentStart: number) {
-    let buf = this.buffer
-    for (let i = parentStart;;) {
-      let curEnd = buf[i + 3]
-      if (curEnd == pos) return i
-      i = curEnd
+  /// @internal
+  findChild(startIndex: number, endIndex: number, dir: 1 | -1, after: number) {
+    let {buffer} = this, pick = -1
+    for (let i = startIndex; i != endIndex; i = buffer[i + 3]) {
+      if (after >= 0) {
+        let start = buffer[i + 1], end = buffer[i + 2]
+        if (dir > 0) {
+          if (end > after || start == after) pick = i
+          if (end > after) break
+        } else {
+          if (start < after || end == after) pick = i
+          if (end >= after) break
+        }
+      } else {
+        pick = i
+        if (dir > 0) break
+      }
     }
+    return pick
   }
 }
 
@@ -522,42 +532,55 @@ export class TreeCursor {
     return this.yield(group.types[buffer[i]], this.bufFrom + buffer[i + 1], this.bufFrom + buffer[i + 2])
   }
 
-  private nextChild(parent: NodeScope, i: number, dir: 1 | -1): boolean {
+  private nextChild(parent: NodeScope, i: number, dir: 1 | -1, after: number): boolean {
     for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
       let next = children[i], start = positions[i] + parent.from
+      if (after >= 0 &&
+          (dir < 0 ? start >= after && start + next.length != after : start + next.length <= after && start != after))
+        continue
       if (next instanceof TreeBuffer) {
-        this.buffer = next
-        this.node = parent
-        this.bufFrom = start
-        this.bufIndex = i
-        return this.yieldBuf(dir < 0 ? this.buffer.childBefore(this.buffer.buffer.length, 0) : 0)
+        let index = next.findChild(0, next.buffer.length, dir, after < 0 ? -1 : after - start)
+        if (index > -1) {
+          this.buffer = next
+          this.node = parent
+          this.bufFrom = start
+          this.bufIndex = i
+          return this.yieldBuf(index)
+        }
       } else if (next.type.name || hasChild(next)) {
         this.buffer = null
         this.node = new NodeScope(next, start, i, parent)
-        return next.type.name ? this.yield(next.type, start, start + next.length) : this.enter(dir)
+        return next.type.name ? this.yield(next.type, start, start + next.length) : this.enter(dir, after)
       }
     }
-    return parent.node.type.name || !parent.parent ? false : this.nextChild(parent.parent, parent.index + dir, dir)
+    return parent.node.type.name || !parent.parent ? false : this.nextChild(parent.parent, parent.index + dir, dir, after)
   }
 
   /// @internal
-  enter(dir: 1 | -1) {
+  enter(dir: 1 | -1, after: number) {
     if (this.buffer) {
-      let nodeStart = this.bufPos + 4, nodeEnd = this.buffer.buffer[this.bufPos + 3]
-      if (nodeStart == nodeEnd) return false
+      let index = this.buffer.findChild(this.bufPos + 4, this.buffer.buffer[this.bufPos + 3], dir,
+                                        after < 0 ? -1 : after - this.bufFrom)
+      if (index < 0) return false
       this.bufStack.push(this.bufPos)
-      return this.yieldBuf(dir < 0 ? this.buffer.childBefore(nodeEnd, nodeStart) : nodeStart)
+      return this.yieldBuf(index)
     } else {
-      return this.nextChild(this.node, dir < 0 ? this.node.node.children.length - 1 : 0, dir)
+      return this.nextChild(this.node, dir < 0 ? this.node.node.children.length - 1 : 0, dir, after)
     }
   }
 
   /// Move the cursor to this node's first child. When this returns
   /// false, the node has no child, and the cursor has not been moved.
-  firstChild() { return this.enter(1) }
+  firstChild() { return this.enter(1, -1) }
 
   /// Move the cursor to this node's last child.
-  lastChild() { return this.enter(-1) }
+  lastChild() { return this.enter(-1, -1) }
+
+  /// Move the cursor to the first child that starts at or after `pos`.
+  childAfter(pos: number) { return this.enter(1, pos) }
+
+  /// Move to the last child that ends at or before `pos`.
+  childBefore(pos: number) { return this.enter(-1, pos) }
 
   /// Move the node's parent node, if this isn't the top node.
   parent() {
@@ -581,18 +604,18 @@ export class TreeCursor {
   /// @internal
   sibling(dir: 1 | -1) {
     if (!this.buffer)
-      return this.node.parent ? this.nextChild(this.node.parent, this.node.index + dir, dir) : false
+      return this.node.parent ? this.nextChild(this.node.parent, this.node.index + dir, dir, -1) : false
 
     let {buffer} = this.buffer, d = this.bufStack.length - 1
     if (dir < 0) {
       let parentStart = d < 0 ? 0 : this.bufStack[d] + 4
       if (this.bufPos != parentStart)
-        return this.yieldBuf(this.buffer.childBefore(this.bufPos, parentStart))
+        return this.yieldBuf(this.buffer.findChild(parentStart, this.bufPos, -1, -1))
     } else {
       let after = buffer[this.bufPos + 3]
       if (after < (d < 0 ? buffer.length : buffer[this.bufStack[d] + 3])) return this.yieldBuf(after)
     }
-    return d >= 0 ? false : this.nextChild(this.node, this.bufIndex + dir, dir)
+    return d >= 0 ? false : this.nextChild(this.node, this.bufIndex + dir, dir, -1)
   }
 
   /// Move to this node's next sibling, if any.
@@ -624,7 +647,7 @@ export class TreeCursor {
   }
 
   private move(dir: 1 | -1) {
-    if (this.enter(dir)) return true
+    if (this.enter(dir, -1)) return true
     for (;;) {
       if (this.sibling(dir)) return true
       if (this.atLastNode(dir) || !this.parent()) return false
@@ -654,14 +677,13 @@ export class TreeCursor {
       if (!this.parent()) break
 
     // Then scan down into child nodes as far as possible
-    enter: for (;;) {
-      if (!this.firstChild()) break
-      do {
-        if (side < 1 ? this.from >= pos : this.from > pos) break
-        if (side > -1 ? this.to > pos : this.to >= pos) continue enter
-      } while (this.nextSibling())
-      this.parent()
-      break
+    for (;;) {
+      if (side < 0 ? !this.childBefore(pos) : !this.childAfter(pos)) break
+      if ((side < 1 ? this.from >= pos : this.from > pos) ||
+          (side > -1 ? this.to <= pos : this.to < pos)) {
+        this.parent()
+        break
+      }
     }
     return this
   }

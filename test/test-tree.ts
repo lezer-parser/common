@@ -53,7 +53,7 @@ describe("cursor", () => {
     ist(c.from, 1)
     ist(c.to, 2)
     ist(c.name, "a")
-    c.parent()
+    ist(c.parent())
     ist(c.name, "T")
     ist(!c.parent())
     c = simple().cursor(2, 1)
@@ -160,6 +160,21 @@ describe("cursor", () => {
     let tree = recur(), start = tree.length >> 1, cursor = tree.cursor(start, 1)
     do { ist(cursor.from, start, ">=") }
     while (cursor.next())
+  })
+
+  it("can move to a specific sibling", () => {
+    let cursor = simple().cursor()
+    ist(cursor.childAfter(2))
+    ist(cursor.to, 3)
+    cursor.parent()
+    ist(cursor.childBefore(5))
+    ist(cursor.from, 4)
+    ist(cursor.childAfter(11))
+    ist(cursor.from, 8)
+    ist(cursor.childBefore(10))
+    ist(cursor.from, 9)
+    ist(!simple().cursor().childBefore(0))
+    ist(!simple().cursor().childAfter(100))
   })
 
   it("isn't slow", () => {
