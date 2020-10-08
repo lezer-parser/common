@@ -50,25 +50,25 @@ function simple() {
 describe("cursor", () => {
   it("can resolve at the top level", () => {
     let c = simple().cursor(2, -1)
-    ist(c.start, 1)
-    ist(c.end, 2)
+    ist(c.from, 1)
+    ist(c.to, 2)
     ist(c.name, "a")
     c.parent()
     ist(c.name, "T")
     ist(!c.parent())
     c = simple().cursor(2, 1)
-    ist(c.start, 2)
-    ist(c.end, 3)
+    ist(c.from, 2)
+    ist(c.to, 3)
     c = simple().cursor(2)
     ist(c.name, "T")
-    ist(c.start, 0)
-    ist(c.end, 23)
+    ist(c.from, 0)
+    ist(c.to, 23)
   })
 
   it("can resolve deeper", () => {
     let c = simple().cursor(10, 1)
     ist(c.name, "c")
-    ist(c.start, 10)
+    ist(c.from, 10)
     c.parent()
     ist(c.name, "Br")
     c.parent()
@@ -99,8 +99,8 @@ describe("cursor", () => {
     let count: Record<string, number> = Object.create(null)
     let pos = 0, cur = simple().cursor()
     do {
-      ist(cur.start, pos, ">=")
-      pos = cur.start
+      ist(cur.from, pos, ">=")
+      pos = cur.from
       count[cur.name] = (count[cur.name] || 0) + 1
     } while (cur.next())
     for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
@@ -110,8 +110,8 @@ describe("cursor", () => {
     let count: Record<string, number> = Object.create(null)
     let pos = 100, cur = simple().cursor()
     do {
-      ist(cur.end, pos, "<=")
-      pos = cur.end
+      ist(cur.to, pos, "<=")
+      pos = cur.to
       count[cur.name] = (count[cur.name] || 0) + 1
     } while (cur.prev())
     for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
@@ -121,21 +121,21 @@ describe("cursor", () => {
     let cur = simple().cursor()
     ist(!cur.parent())
     cur.next(); cur.next()
-    ist(cur.start, 1)
+    ist(cur.from, 1)
     ist(cur.parent())
-    ist(cur.start, 0)
+    ist(cur.from, 0)
     for (let j = 0; j < 6; j++) cur.next()
-    ist(cur.start, 5)
+    ist(cur.from, 5)
     ist(cur.parent())
-    ist(cur.start, 4)
+    ist(cur.from, 4)
     ist(cur.parent())
-    ist(cur.start, 0)
+    ist(cur.from, 0)
     ist(!cur.parent())
   })
 
   it("can move to a given position", () => {
     let tree = recur(), start = tree.length >> 1, cursor = tree.cursor(start, 1)
-    do { ist(cursor.start, start, ">=") }
+    do { ist(cursor.from, start, ">=") }
     while (cursor.next())
   })
 
@@ -144,7 +144,7 @@ describe("cursor", () => {
     for (let i = 0; i < 2000; i++) {
       let cur = tree.cursor()
       do {
-        if (cur.start < 0 || !cur.name) throw new Error("BAD")
+        if (cur.from < 0 || !cur.name) throw new Error("BAD")
         count++
       } while (cur.next())
     }

@@ -245,8 +245,8 @@ export class Tree {
 
     function cutAt(tree: Tree, pos: number, side: -1 | 1) {
       for (let cursor: TreeCursor = tree.cursor(pos, -side as -1 | 1);;) {
-        if ((side < 0 ? cursor.end <= pos : cursor.start >= pos) && !cursor.type.prop(NodeProp.error))
-          return side < 0 ? Math.min(pos, cursor.end - 1) : Math.max(pos, cursor.start + 1)
+        if ((side < 0 ? cursor.to <= pos : cursor.from >= pos) && !cursor.type.prop(NodeProp.error))
+          return side < 0 ? Math.min(pos, cursor.to - 1) : Math.max(pos, cursor.from + 1)
         if (!(side < 0 ? cursor.prev() : cursor.next())) return side < 0 ? 0 : tree.length
       }
     }
@@ -415,7 +415,7 @@ export class TreeBuffer {
 
 class NodeScope {
   constructor(readonly node: Tree,
-              readonly start: number,
+              readonly from: number,
               readonly index: number,
               readonly parent: NodeScope | null) {}
 }
@@ -430,10 +430,10 @@ class TreeCursor {
   get name() { return this.type.name }
 
   /// The start source offset of this node.
-  start!: number
+  from!: number
 
   /// The end source offset.
-  end!: number
+  to!: number
 
   /// @internal
   constructor(
@@ -442,7 +442,7 @@ class TreeCursor {
     /// @internal
     public buffer: TreeBuffer | null,
     /// @internal
-    public bufStart: number,
+    public bufFrom: number,
     /// @internal
     public bufStack: number[],
     /// @internal
@@ -451,7 +451,7 @@ class TreeCursor {
     public bufIndex: number
   ) {
     if (buffer) this.yieldBuf(this.bufPos)
-    else this.yield(node.node.type, node.start, node.start + node.node.length)
+    else this.yield(node.node.type, node.from, node.from + node.node.length)
   }
 
   /// The depth (number of named parent nodes) of this node.
@@ -479,29 +479,29 @@ class TreeCursor {
   /// Create a copy of this cursor. Can be useful when you need to
   /// keep track of a given node, but also to iterate further from it.
   clone() {
-    return new TreeCursor(this.node, this.buffer, this.bufStart, this.bufStack.slice(), this.bufPos, this.bufIndex)
+    return new TreeCursor(this.node, this.buffer, this.bufFrom, this.bufStack.slice(), this.bufPos, this.bufIndex)
   }
 
-  private yield(type: NodeType, start: number, end: number) {
+  private yield(type: NodeType, from: number, to: number) {
     this.type = type
-    this.start = start
-    this.end = end
+    this.from = from
+    this.to = to
     return true
   }
 
   private yieldBuf(i: number) {
     this.bufPos = i
     let {buffer, group} = this.buffer!
-    return this.yield(group.types[buffer[i]], this.bufStart + buffer[i + 1], this.bufStart + buffer[i + 2])
+    return this.yield(group.types[buffer[i]], this.bufFrom + buffer[i + 1], this.bufFrom + buffer[i + 2])
   }
 
   private nextChild(parent: NodeScope, i: number, dir: 1 | -1): boolean {
     for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
-      let next = children[i], start = positions[i] + parent.start
+      let next = children[i], start = positions[i] + parent.from
       if (next instanceof TreeBuffer) {
         this.buffer = next
         this.node = parent
-        this.bufStart = start
+        this.bufFrom = start
         this.bufIndex = i
         return this.yieldBuf(dir < 0 ? this.buffer.childBefore(this.buffer.buffer.length, 0) : 0)
       } else if (next.type.name || hasChild(next)) {
@@ -545,7 +545,7 @@ class TreeCursor {
       if (scan.node.type.name) {
         this.buffer = null
         this.node = scan
-        return this.yield(scan.node.type, scan.start, scan.start + scan.node.length)
+        return this.yield(scan.node.type, scan.from, scan.from + scan.node.length)
       }
     }
   }
@@ -620,16 +620,16 @@ class TreeCursor {
   /// it will enter nodes that start at `pos`.
   moveTo(pos: number, side: -1 | 0 | 1 = 0) {
     // Move up to a node that actually holds the position, if possible
-    while ((side < 1 ? this.start >= pos : this.start > pos) ||
-           (side > -1 ? this.end <= pos : this.end < pos))
+    while ((side < 1 ? this.from >= pos : this.from > pos) ||
+           (side > -1 ? this.to <= pos : this.to < pos))
       if (!this.parent()) break
 
     // Then scan down into child nodes as far as possible
     enter: for (;;) {
       if (!this.firstChild()) break
       do {
-        if (side < 1 ? this.start >= pos : this.start > pos) break
-        if (side > -1 ? this.end > pos : this.end >= pos) continue enter
+        if (side < 1 ? this.from >= pos : this.from > pos) break
+        if (side > -1 ? this.to > pos : this.to >= pos) continue enter
       } while (this.nextSibling())
       this.parent()
       break
