@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType, TreeCursor} from ".."
+import {Tree, NodeGroup, NodeType} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
@@ -47,106 +47,108 @@ function simple() {
   return _simple || (_simple = mk("aaaa(bbb[ccc][aaa][()])"))
 }
 
-describe("resolve", () => {
+describe("cursor", () => {
   it("can resolve at the top level", () => {
-    let tr = simple().resolve(2, -1)
-    ist(tr.start, 1)
-    ist(tr.end, 2)
-    ist(tr.name, "a")
-    tr = tr.parent()!
-    ist(tr.name, "T")
-    ist(tr.parent(), null)
-    tr = simple().resolve(2, 1)
-    ist(tr.start, 2)
-    ist(tr.end, 3)
-    tr = simple().resolve(2)
-    ist(tr.name, "T")
-    ist(tr.start, 0)
-    ist(tr.end, 23)
+    let c = simple().cursor(2, -1)
+    ist(c.start, 1)
+    ist(c.end, 2)
+    ist(c.name, "a")
+    c.parent()
+    ist(c.name, "T")
+    ist(!c.parent())
+    c = simple().cursor(2, 1)
+    ist(c.start, 2)
+    ist(c.end, 3)
+    c = simple().cursor(2)
+    ist(c.name, "T")
+    ist(c.start, 0)
+    ist(c.end, 23)
   })
 
   it("can resolve deeper", () => {
-    let tr = simple().resolve(10, 1)
-    ist(tr.name, "c")
-    ist(tr.start, 10)
-    tr = tr.parent()!
-    ist(tr.name, "Br")
-    tr = tr.parent()!
-    ist(tr.name, "Pa")
-    ist(tr.parent()!.name, "T")
+    let c = simple().cursor(10, 1)
+    ist(c.name, "c")
+    ist(c.start, 10)
+    c.parent()
+    ist(c.name, "Br")
+    c.parent()
+    ist(c.name, "Pa")
+    c.parent()
+    ist(c.name, "T")
   })
 
-  it("can resolve into a parent node", () => {
-    let tr = simple().resolve(10).moveTo(2)
-    ist(tr.name, "T")
+  it("can move into a parent node", () => {
+    let c = simple().cursor(10).moveTo(2)
+    ist(c.name, "T")
   })
 
   it("can resolve in a large tree", () => {
-    let tr = recur().resolve(10, 1)
-    ist(tr.depth, 7)
+    let c = recur().cursor(10, 1)
+    ist(c.depth, 7)
   })
 
   it("caches resolved parents", () => {
-    ist(recur().resolve(10, 1).parent, recur().resolve(13, 1).parent)
+    let a = recur().cursor(10, 1), b = recur().cursor(13, 1)
+    a.parent(); b.parent()
+    ist((a as any).node, (b as any).node)
   })
-})
 
-describe("cursor", () => {
   const simpleCount: Record<string, number> = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
 
   it("iterates over all nodes", () => {
     let count: Record<string, number> = Object.create(null)
-    let pos = 0
-    for (let cur: TreeCursor | null = simple().cursor(); cur; cur = cur.next()) {
+    let pos = 0, cur = simple().cursor()
+    do {
       ist(cur.start, pos, ">=")
       pos = cur.start
       count[cur.name] = (count[cur.name] || 0) + 1
-    }
+    } while (cur.next())
     for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
   })
 
   it("iterates over all nodes in reverse", () => {
     let count: Record<string, number> = Object.create(null)
-    let pos = 100
-    for (let cur: TreeCursor | null = simple().cursor(); cur; cur = cur.prev()) {
+    let pos = 100, cur = simple().cursor()
+    do {
       ist(cur.end, pos, "<=")
       pos = cur.end
       count[cur.name] = (count[cur.name] || 0) + 1
-    }
+    } while (cur.prev())
     for (let k of Object.keys(simpleCount)) ist(count[k], simpleCount[k])
   })
 
   it("can leave nodes", () => {
     let cur = simple().cursor()
     ist(!cur.parent())
-    cur = cur.next()!.next()!
+    cur.next(); cur.next()
     ist(cur.start, 1)
-    ist(cur = cur.clone().parent()!)
+    ist(cur.parent())
     ist(cur.start, 0)
-    for (let j = 0; j < 6; j++) cur = cur.next()!
+    for (let j = 0; j < 6; j++) cur.next()
     ist(cur.start, 5)
-    ist(cur = cur.clone().parent()!)
+    ist(cur.parent())
     ist(cur.start, 4)
-    ist(cur = cur.clone().parent()!)
+    ist(cur.parent())
     ist(cur.start, 0)
     ist(!cur.parent())
   })
 
   it("can move to a given position", () => {
-    let tree = recur(), start = tree.length >> 1, cursor: TreeCursor | null = tree.cursor().moveTo(start, 1)
+    let tree = recur(), start = tree.length >> 1, cursor = tree.cursor(start, 1)
     do { ist(cursor.start, start, ">=") }
-    while (cursor = cursor.next())
+    while (cursor.next())
   })
 
   it("isn't slow", () => {
     let tree = recur(), t0 = Date.now(), count = 0
-    for (let i = 0; i < 2000; i++)
-      for (let cur: TreeCursor | null = tree.cursor(); cur; cur = cur.next()) {
+    for (let i = 0; i < 2000; i++) {
+      let cur = tree.cursor()
+      do {
         if (cur.start < 0 || !cur.name) throw new Error("BAD")
         count++
-      }
+      } while (cur.next())
+    }
     let perMS = count / (Date.now() - t0)
-    console.log(perMS, "/ms")
     ist(perMS, 10000, ">")
   })
 })
