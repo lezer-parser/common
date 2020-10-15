@@ -117,7 +117,11 @@ export class NodeType {
     readonly props: {readonly [prop: number]: any},
     /// The id of this node in its group. Corresponds to the term ids
     /// used in the parser.
-    readonly id: number) {}
+    readonly id: number,
+    /// Indicates whether this node is an unnamed node used to express
+    /// repetition (cursors and `SyntaxNode` motion will ignore such
+    /// nodes).
+    readonly repeat: boolean = false) {}
 
   /// Retrieves a node prop for this type. Will return `undefined` if
   /// the prop isn't present on this node.
@@ -175,7 +179,7 @@ export class NodeGroup {
           newProps[source.prop.id] = value
         }
       }
-      newTypes.push(newProps ? new NodeType(type.name, newProps, type.id) : type)
+      newTypes.push(newProps ? new NodeType(type.name, newProps, type.id, type.repeat) : type)
     }
     return new NodeGroup(newTypes)
   }
@@ -325,10 +329,10 @@ export class Tree {
   }) {
     let {enter, leave, from = 0, to = this.length} = spec
     for (let c = this.cursor();;) {
-      if (c.from <= to && c.to >= from && (!c.type.name || enter(c.type, c.from, c.to) !== false) && c.firstChild())
+      if (c.from <= to && c.to >= from && (c.type.repeat || enter(c.type, c.from, c.to) !== false) && c.firstChild())
         continue
       for (;;) {
-        if (leave && c.type.name && c.from <= to && c.to >= from) leave(c.type, c.from, c.to)
+        if (leave && !c.type.repeat && c.from <= to && c.to >= from) leave(c.type, c.from, c.to)
         if (c.nextSibling()) break
         if (!c.parent()) return
       }
@@ -523,14 +527,14 @@ class TreeNode implements SyntaxNode {
         if (next instanceof TreeBuffer) {
           let index = next.findChild(0, next.buffer.length, dir, after == After.None ? After.None : after - start)
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
-        } else if (next.type.name || hasChild(next)) {
+        } else if (!next.type.repeat || hasChild(next)) {
           let inner = new TreeNode(next, start, i, parent)
-          return inner.name ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
+          return !inner.type.repeat ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
         }
       }
-      if (parent.name || !parent._parent) return null
+      if (!parent.type.repeat) return null
       i = parent.index + dir
-      parent = parent._parent
+      parent = parent._parent!
     }
   }
 
@@ -542,7 +546,7 @@ class TreeNode implements SyntaxNode {
 
   nextSignificant() {
     let val: TreeNode = this
-    while (!val.name && val._parent) val = val._parent
+    while (val.type.repeat) val = val._parent!
     return val
   }
 
@@ -767,7 +771,7 @@ export class TreeCursor {
     for (; parent; {index, _parent: parent} = parent) {
       for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
-        if (child.type.name || child instanceof TreeBuffer || hasChild(child)) return false
+        if (!child.type.repeat || child instanceof TreeBuffer || hasChild(child)) return false
       }
     }
     return true
@@ -826,7 +830,7 @@ export class TreeCursor {
 }
 
 function hasChild(tree: Tree): boolean {
-  return tree.children.some(ch => ch.type.name || ch instanceof TreeBuffer || hasChild(ch))
+  return tree.children.some(ch => !ch.type.repeat || ch instanceof TreeBuffer || hasChild(ch))
 }
 
 /// This is used by `Tree.build` as an abstraction for iterating over
