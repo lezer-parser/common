@@ -2,6 +2,8 @@
 
 @Tree
 
+@SyntaxNode
+
 @TreeCursor
 
 @ChangedRange

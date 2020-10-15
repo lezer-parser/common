@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType} from ".."
+import {Tree, NodeGroup, NodeType, SyntaxNode} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
@@ -47,52 +47,45 @@ function simple() {
   return _simple || (_simple = mk("aaaa(bbb[ccc][aaa][()])"))
 }
 
-describe("cursor", () => {
+describe("SyntaxNode", () => {
   it("can resolve at the top level", () => {
-    let c = simple().cursor(2, -1)
+    let c = simple().resolve(2, -1)
     ist(c.from, 1)
     ist(c.to, 2)
     ist(c.name, "a")
-    ist(c.parent())
-    ist(c.name, "T")
-    ist(!c.parent())
-    c = simple().cursor(2, 1)
+    ist(c.parent!.name, "T")
+    ist(!c.parent!.parent)
+    c = simple().resolve(2, 1)
     ist(c.from, 2)
     ist(c.to, 3)
-    c = simple().cursor(2)
+    c = simple().resolve(2)
     ist(c.name, "T")
     ist(c.from, 0)
     ist(c.to, 23)
   })
 
   it("can resolve deeper", () => {
-    let c = simple().cursor(10, 1)
+    let c = simple().resolve(10, 1)
     ist(c.name, "c")
     ist(c.from, 10)
-    c.parent()
-    ist(c.name, "Br")
-    c.parent()
-    ist(c.name, "Pa")
-    c.parent()
-    ist(c.name, "T")
-  })
-
-  it("can move into a parent node", () => {
-    let c = simple().cursor(10).moveTo(2)
-    ist(c.name, "T")
+    ist(c.parent!.name, "Br")
+    ist(c.parent!.parent!.name, "Pa")
+    ist(c.parent!.parent!.parent!.name, "T")
   })
 
   it("can resolve in a large tree", () => {
-    let c = recur().cursor(10, 1)
-    ist(c.depth, 8)
+    let c: SyntaxNode | null = recur().resolve(10, 1), depth = 1
+    while (c = c.parent) depth++
+    ist(depth, 8)
   })
 
   it("caches resolved parents", () => {
-    let a = recur().cursor(10, 1), b = recur().cursor(13, 1)
-    a.parent(); b.parent()
-    ist((a as any).node, (b as any).node)
+    let a = recur().resolve(3, 1), b = recur().resolve(3, 1)
+    ist(a, b)
   })
+})
 
+describe("TreeCursor", () => {
   const simpleCount: Record<string, number> = {a: 7, b: 3, c: 3, Br: 3, Pa: 2, T: 1}
 
   it("iterates over all nodes", () => {
@@ -162,6 +155,11 @@ describe("cursor", () => {
     while (cursor.next())
   })
 
+  it("can move into a parent node", () => {
+    let c = simple().cursor(10).moveTo(2)
+    ist(c.name, "T")
+  })
+
   it("can move to a specific sibling", () => {
     let cursor = simple().cursor()
     ist(cursor.childAfter(2))
@@ -188,5 +186,30 @@ describe("cursor", () => {
     }
     let perMS = count / (Date.now() - t0)
     ist(perMS, 10000, ">")
+  })
+
+  it("can produce nodes", () => {
+    let node = simple().cursor(8, 1).node
+    ist(node.name, "Br")
+    ist(node.from, 8)
+    ist(node.parent!.name, "Pa")
+    ist(node.parent!.from, 4)
+    ist(node.parent!.parent!.name, "T")
+    ist(node.parent!.parent!.from, 0)
+    ist(node.parent!.parent!.parent, null)
+  })
+
+  it("can produce node from cursors created from nodes", () => {
+    let cur = simple().topNode.lastChild!.childAfter(8)!.childAfter(10)!.cursor
+    ist(cur.name, "c")
+    ist(cur.from, 10)
+    ist(cur.parent())
+    let node = cur.node
+    ist(node.name, "Br")
+    ist(node.from, 8)
+    ist(node.parent!.name, "Pa")
+    ist(node.parent!.from, 4)
+    ist(node.parent!.parent!.name, "T")
+    ist(node.parent!.parent!.parent, null)
   })
 })
