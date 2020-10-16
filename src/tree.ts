@@ -503,6 +503,9 @@ export interface SyntaxNode {
   prevSibling: SyntaxNode | null
   /// A [tree cursor](#tree.TreeCursor) starting at this node.
   cursor: TreeCursor
+
+  getChild(type: string, before?: string | null, after?: string | null): SyntaxNode | null
+  getChildren(type: string, before?: string | null, after?: string | null): SyntaxNode[]
 }
 
 class TreeNode implements SyntaxNode {
@@ -563,8 +566,36 @@ class TreeNode implements SyntaxNode {
 
   get cursor() { return new TreeCursor(this) }
 
+  getChild(type: string, before: string | null = null, after: string | null = null) {
+    return getChildren(this, type, before, after, true)
+  }
+
+  getChildren(type: string, before: string | null = null, after: string | null = null) {
+    return getChildren(this, type, before, after, false)
+  }
+
   /// @internal
   toString() { return this.node.toString() }
+}
+
+function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null, single: true): SyntaxNode | null
+function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null, single: false): SyntaxNode[]
+function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null, single: boolean)
+  : SyntaxNode | SyntaxNode[] | null {
+  let cur = node.cursor, result: SyntaxNode[] | null = single ? null : []
+  if (cur.firstChild()) for (let inside = before == null;;) {
+    if (inside) {
+      if (after != null && cur.name == after) break
+      if (cur.name == type) {
+        if (single) return cur.node
+        else result!.push(cur.node)
+      }
+    } else if (cur.name == before) {
+      inside = true
+    }
+    if (!cur.nextSibling()) break
+  }
+  return result
 }
 
 class BufferContext {
@@ -629,6 +660,14 @@ class BufferNode implements SyntaxNode {
 
   /// @internal
   toString() { return this.context.buffer.childString(this.index) }
+
+  getChild(type: string, before: string | null = null, after: string | null = null) {
+    return getChildren(this, type, before, after, true)
+  }
+
+  getChildren(type: string, before: string | null = null, after: string | null = null) {
+    return getChildren(this, type, before, after, false)
+  }
 }
 
 /// A tree cursor object focuses on a given node in a syntax tree, and
