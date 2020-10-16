@@ -651,6 +651,7 @@ export class TreeCursor {
   private buffer: BufferContext | null = null
   private stack: number[] = []
   private index: number = 0
+  private bufferNode: BufferNode | null = null
 
   /// @internal
   constructor(node: TreeNode | BufferNode) {
@@ -823,9 +824,21 @@ export class TreeCursor {
   /// position.
   get node(): SyntaxNode {
     if (!this.buffer) return this.tree
-    let result: BufferNode | null = null
-    for (let i = 0; i < this.stack.length; i++) result = new BufferNode(this.buffer, result, this.stack[i])
-    return new BufferNode(this.buffer, result, this.index)
+    
+    let cache = this.bufferNode, result: BufferNode | null = null, depth = 0
+    if (cache && cache.context == this.buffer) {
+      scan: for (let index = this.index, d = this.stack.length; d >= 0;) {
+        for (let c: BufferNode | null = cache; c; c = c._parent) if (c.index == index) {
+          if (index == this.index) return c
+          result = c
+          depth = d + 1
+          break scan
+        }
+        index = this.stack[--d]
+      }
+    }
+    for (let i = depth; i < this.stack.length; i++) result = new BufferNode(this.buffer, result, this.stack[i])
+    return this.bufferNode = new BufferNode(this.buffer, result, this.index)
   }
 }
 

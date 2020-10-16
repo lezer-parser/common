@@ -212,4 +212,16 @@ describe("TreeCursor", () => {
     ist(node.parent!.parent!.name, "T")
     ist(node.parent!.parent!.parent, null)
   })
+
+  it("reuses nodes in buffers", () => {
+    let cur = simple().cursor(10, 1)
+    let n10 = cur.node
+    ist(n10.name, "c")
+    ist(n10.from, 10)
+    ist(cur.node, n10)
+    cur.nextSibling()
+    ist(cur.node.parent, n10.parent)
+    cur.parent()
+    ist(cur.node, n10.parent)
+  })
 })
