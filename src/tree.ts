@@ -703,6 +703,7 @@ export class TreeCursor {
       this.tree = node.context.parent
       this.buffer = node.context
       for (let n: BufferNode | null = node._parent; n; n = n._parent) this.stack.unshift(n.index)
+      this.bufferNode = node
       this.yieldBuf(node.index)
     }
   }
