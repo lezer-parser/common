@@ -79,6 +79,11 @@ export class NodeProp<T> {
   /// attached to closing delimiters, holding an array of node names
   /// of types of matching opening delimiters.
   static openedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
+
+  /// Used to assign node types to a group (for example, all node
+  /// types that represent an expression could be tagged with an
+  /// `"Expression"` group).
+  static group = NodeProp.string()
 }
 
 /// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
