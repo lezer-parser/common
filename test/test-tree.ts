@@ -1,7 +1,8 @@
-import {Tree, NodeGroup, NodeType, SyntaxNode} from ".."
+import {Tree, NodeGroup, NodeType, SyntaxNode, NodeProp} from ".."
 import ist from "ist"
 
-let types = "T a b c Pa Br".split(" ").map((s, i) => new (NodeType as any)(s, {}, i))
+let types = "T a b c Pa Br".split(" ")
+  .map((s, i) => new (NodeType as any)(s, /^[abc]$/.test(s) ? NodeProp.group.set({}, "atom") : {}, i))
 let repeat = new (NodeType as any)("", {}, types.length, 8)
 types.push(repeat)
 let group = new NodeGroup(types)
@@ -82,6 +83,36 @@ describe("SyntaxNode", () => {
   it("caches resolved parents", () => {
     let a = recur().resolve(3, 1), b = recur().resolve(3, 1)
     ist(a, b)
+  })
+
+  describe("getChild", () => {
+    function flat(children: readonly SyntaxNode[]) {
+      return children.map(c => c.name).join(",")
+    }
+
+    it("can get children by group", () => {
+      let tree = mk("aa(bb)[aabbcc]").topNode
+      ist(flat(tree.getChildren("atom")), "a,a")
+      ist(flat(tree.firstChild!.getChildren("atom")), "")
+      ist(flat(tree.lastChild!.getChildren("atom")), "a,a,b,b,c,c")
+    })
+
+    it("can get single children", () => {
+      let tree = mk("abc()").topNode
+      ist(tree.getChild("Br"), null)
+      ist(tree.getChild("Pa")?.name, "Pa")
+    })
+
+    it("can get children between others", () => {
+      let tree = mk("aa(bb)[aabbcc]").topNode
+      ist(tree.getChild("Pa", "atom", "Br"))
+      ist(!tree.getChild("Pa", "atom", "atom"))
+      let last = tree.lastChild!
+      ist(flat(last.getChildren("b", "a", "c")), "b,b")
+      ist(flat(last.getChildren("a", null, "c")), "a,a")
+      ist(flat(last.getChildren("c", "b", null)), "c,c")
+      ist(flat(last.getChildren("b", "c")), "")
+    })
   })
 })
 

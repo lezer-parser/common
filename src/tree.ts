@@ -512,7 +512,16 @@ export interface SyntaxNode {
   /// A [tree cursor](#tree.TreeCursor) starting at this node.
   cursor: TreeCursor
 
+  /// Get the first child of the given type (which may be a [node
+  /// name](#tree.NodeProp.name) or a [group
+  /// name](#tree.NodeProp^group)). If `before` is non-null, only
+  /// return children that occur somewhere after a node with that name
+  /// or group. If `after` is non-null, only return children that
+  /// occur somewhere before a node with that name or group.
   getChild(type: string, before?: string | null, after?: string | null): SyntaxNode | null
+
+  /// Like [`getChild`](#tree.SyntaxNode.getChild), but return all
+  /// matching children, not just the first.
   getChildren(type: string, before?: string | null, after?: string | null): SyntaxNode[]
 }
 
@@ -575,35 +584,31 @@ class TreeNode implements SyntaxNode {
   get cursor() { return new TreeCursor(this) }
 
   getChild(type: string, before: string | null = null, after: string | null = null) {
-    return getChildren(this, type, before, after, true)
+    let r = getChildren(this, type, before, after)
+    return r.length ? r[0] : null
   }
 
   getChildren(type: string, before: string | null = null, after: string | null = null) {
-    return getChildren(this, type, before, after, false)
+    return getChildren(this, type, before, after)
   }
 
   /// @internal
   toString() { return this.node.toString() }
 }
 
-function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null, single: true): SyntaxNode | null
-function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null, single: false): SyntaxNode[]
-function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null, single: boolean)
-  : SyntaxNode | SyntaxNode[] | null {
-  let cur = node.cursor, result: SyntaxNode[] | null = single ? null : []
-  if (cur.firstChild()) for (let inside = before == null;;) {
-    if (inside) {
-      if (after != null && cur.name == after) break
-      if (cur.name == type) {
-        if (single) return cur.node
-        else result!.push(cur.node)
-      }
-    } else if (cur.name == before) {
-      inside = true
-    }
-    if (!cur.nextSibling()) break
+function matches(type: NodeType, name: string) {
+  return type.name == name || type.prop(NodeProp.group) == name
+}
+
+function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null): SyntaxNode[] {
+  let cur = node.cursor, result: SyntaxNode[] = []
+  if (!cur.firstChild()) return result
+  if (before != null) while (!matches(cur.type, before)) if (!cur.nextSibling()) return result
+  for (;;) {
+    if (after != null && matches(cur.type, after)) return result
+    if (matches(cur.type, type)) result.push(cur.node)
+    if (!cur.nextSibling()) return after == null ? result : []
   }
-  return result
 }
 
 class BufferContext {
@@ -670,11 +675,12 @@ class BufferNode implements SyntaxNode {
   toString() { return this.context.buffer.childString(this.index) }
 
   getChild(type: string, before: string | null = null, after: string | null = null) {
-    return getChildren(this, type, before, after, true)
+    let r = getChildren(this, type, before, after)
+    return r.length ? r[0] : null
   }
 
   getChildren(type: string, before: string | null = null, after: string | null = null) {
-    return getChildren(this, type, before, after, false)
+    return getChildren(this, type, before, after)
   }
 }
 
