@@ -809,7 +809,7 @@ export class TreeCursor {
   nextSibling() { return this.sibling(1) }
 
   /// Move to this node's previous sibling, if any.
-  previousSibling() { return this.sibling(-1) }
+  prevSibling() { return this.sibling(-1) }
 
   private atLastNode(dir: 1 | -1) {
     let index, parent: TreeNode | null, {buffer} = this
