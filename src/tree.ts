@@ -80,10 +80,10 @@ export class NodeProp<T> {
   /// of types of matching opening delimiters.
   static openedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
 
-  /// Used to assign node types to a group (for example, all node
+  /// Used to assign node types to groups (for example, all node
   /// types that represent an expression could be tagged with an
   /// `"Expression"` group).
-  static group = NodeProp.string()
+  static group = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
 }
 
 /// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
@@ -131,19 +131,33 @@ export class NodeType {
   /// not a user-defined named node.
   get isRepeated() { return (this.flags & 8) > 0 }
 
+  /// Returns true when this node's name or one of its
+  /// [groups](#tree.NodeProp^group) matches the given string.
+  is(name: string) {
+    if (this.name == name) return true
+    let group = this.prop(NodeProp.group)
+    return group ? group.indexOf(name) > -1 : false
+  }
+
   /// An empty dummy node type to use when no actual type is available.
   static none: NodeType = new NodeType("", Object.create(null), 0)
 
   /// Create a function from node types to arbitrary values by
-  /// specifying an object whose property names are node names. Often
-  /// useful with [`NodeProp.add`](#tree.NodeProp.add). You can put
-  /// multiple node names, separated by spaces, in a single property
-  /// name to map multiple node names to a single value.
+  /// specifying an object whose property names are node or
+  /// [group](#tree.NodeProp^group) names. Often useful with
+  /// [`NodeProp.add`](#tree.NodeProp.add). You can put multiple
+  /// names, separated by spaces, in a single property name to map
+  /// multiple node names to a single value.
   static match<T>(map: {[selector: string]: T}): (node: NodeType) => T | undefined {
     let direct = Object.create(null)
     for (let prop in map)
       for (let name of prop.split(" ")) direct[name] = map[prop]
-    return (node: NodeType) => direct[node.name]
+    return (node: NodeType) => {
+      for (let groups = node.prop(NodeProp.group), i = -1; i < (groups ? groups.length : 0); i++) {
+        let found = direct[i < 0 ? node.name : groups![i]]
+        if (found) return found
+      }
+    }
   }
 }
 
@@ -511,6 +525,10 @@ export interface SyntaxNode {
   prevSibling: SyntaxNode | null
   /// A [tree cursor](#tree.TreeCursor) starting at this node.
   cursor: TreeCursor
+  /// Find the node around, before (if `side` is -1), or after (`side`
+  /// is 1) the given position. Will look in parent nodes if the
+  /// position is outside this node.
+  resolve(pos: number, side?: -1 | 0 | 1): SyntaxNode
 
   /// Get the first child of the given type (which may be a [node
   /// name](#tree.NodeProp.name) or a [group
@@ -583,6 +601,10 @@ class TreeNode implements SyntaxNode {
 
   get cursor() { return new TreeCursor(this) }
 
+  resolve(pos: number, side: -1 | 0 | 1 = 0) {
+    return this.cursor.moveTo(pos, side).node
+  }
+
   getChild(type: string, before: string | null = null, after: string | null = null) {
     let r = getChildren(this, type, before, after)
     return r.length ? r[0] : null
@@ -596,17 +618,13 @@ class TreeNode implements SyntaxNode {
   toString() { return this.node.toString() }
 }
 
-function matches(type: NodeType, name: string) {
-  return type.name == name || type.prop(NodeProp.group) == name
-}
-
 function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null): SyntaxNode[] {
   let cur = node.cursor, result: SyntaxNode[] = []
   if (!cur.firstChild()) return result
-  if (before != null) while (!matches(cur.type, before)) if (!cur.nextSibling()) return result
+  if (before != null) while (!cur.type.is(before)) if (!cur.nextSibling()) return result
   for (;;) {
-    if (after != null && matches(cur.type, after)) return result
-    if (matches(cur.type, type)) result.push(cur.node)
+    if (after != null && cur.type.is(after)) return result
+    if (cur.type.is(type)) result.push(cur.node)
     if (!cur.nextSibling()) return after == null ? result : []
   }
 }
@@ -670,6 +688,10 @@ class BufferNode implements SyntaxNode {
   }
 
   get cursor() { return new TreeCursor(this) }
+
+  resolve(pos: number, side: -1 | 0 | 1 = 0) {
+    return this.cursor.moveTo(pos, side).node
+  }
 
   /// @internal
   toString() { return this.context.buffer.childString(this.index) }
