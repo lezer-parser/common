@@ -478,10 +478,10 @@ export class TreeBuffer {
       if (after != After.None) {
         let start = buffer[i + 1], end = buffer[i + 2]
         if (dir > 0) {
-          if (end > after || start == after) pick = i
+          if (end > after) pick = i
           if (end > after) break
         } else {
-          if (start < after || end == after) pick = i
+          if (start < after) pick = i
           if (end >= after) break
         }
       } else {
@@ -559,8 +559,7 @@ class TreeNode implements SyntaxNode {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
         let next = children[i], start = positions[i] + parent.from
-        if (after != After.None &&
-            (dir < 0 ? start >= after && start + next.length != after : start + next.length <= after && start != after))
+        if (after != After.None && (dir < 0 ? start >= after : start + next.length <= after))
           continue
         if (next instanceof TreeBuffer) {
           let index = next.findChild(0, next.buffer.length, dir, after == After.None ? After.None : after - start)
