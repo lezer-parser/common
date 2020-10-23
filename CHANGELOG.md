@@ -1,3 +1,29 @@
+## 0.12.0 (2020-10-23)
+
+### Breaking changes
+
+`Tree.iterate` no longer allows returning from inside the iteration (use cursors directly for that kind of use cases).
+
+`Subtree` has been renamed to `SyntaxNode` and narrowed in scope a little.
+
+The `top`, `skipped`, and `error` node props no longer exist.
+
+### New features
+
+The package now offers a `TreeCursor` abstraction, which can be used for both regular iteration and for custom traversal of a tree.
+
+`SyntaxNode` instances have `nextSibling`/`prevSibling` getters that allow more direct navigation through the tree.
+
+Node types now expose `isTop`, `isSkipped`, `isError`, and `isRepeated` properties that indicate special status.
+
+Adds `NodeProp.group` to assign group names to node types.
+
+Syntax nodes now have helper functions `getChild` and `getChildren` to retrieve direct child nodes by type or group.
+
+`NodeType.match` (and thus `NodeProp.add`) now allows types to be targeted by group name.
+
+Node types have a new `is` method for checking whether their name or one of their groups matches a given string.
+
 ## 0.11.1 (2020-09-26)
 
 ### Bug fixes
