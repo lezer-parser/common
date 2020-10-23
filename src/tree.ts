@@ -879,14 +879,16 @@ export class TreeCursor {
   /// it will enter nodes that start at `pos`.
   moveTo(pos: number, side: -1 | 0 | 1 = 0) {
     // Move up to a node that actually holds the position, if possible
-    while ((side < 1 ? this.from >= pos : this.from > pos) ||
+    while (this.from == this.to ||
+           (side < 1 ? this.from >= pos : this.from > pos) ||
            (side > -1 ? this.to <= pos : this.to < pos))
       if (!this.parent()) break
 
     // Then scan down into child nodes as far as possible
     for (;;) {
       if (side < 0 ? !this.childBefore(pos) : !this.childAfter(pos)) break
-      if ((side < 1 ? this.from >= pos : this.from > pos) ||
+      if (this.from == this.to ||
+          (side < 1 ? this.from >= pos : this.from > pos) ||
           (side > -1 ? this.to <= pos : this.to < pos)) {
         this.parent()
         break

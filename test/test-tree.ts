@@ -2,7 +2,7 @@ import {Tree, NodeGroup, NodeType, SyntaxNode, NodeProp} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ")
-  .map((s, i) => new (NodeType as any)(s, /^[abc]$/.test(s) ? NodeProp.group.set({}, "atom") : {}, i))
+  .map((s, i) => new (NodeType as any)(s, /^[abc]$/.test(s) ? NodeProp.group.set({}, ["atom"]) : {}, i))
 let repeat = new (NodeType as any)("", {}, types.length, 8)
 types.push(repeat)
 let group = new NodeGroup(types)
