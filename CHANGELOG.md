@@ -1,3 +1,9 @@
+## 0.12.1 (2020-10-26)
+
+### Bug fixes
+
+Fix issue where using `Tree.append` with an empty tree as argument would return a tree with a nonsensical `length` property.
+
 ## 0.12.0 (2020-10-23)
 
 ### Breaking changes
