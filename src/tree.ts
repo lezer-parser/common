@@ -364,7 +364,8 @@ export class Tree {
   /// Append another tree to this tree. `other` must have empty space
   /// big enough to fit this tree at its start.
   append(other: Tree) {
-    if (other.children.length && other.positions[0] < this.length) throw new Error("Can't append overlapping trees")
+    if (!other.children.length) return this
+    if (other.positions[0] < this.length) throw new Error("Can't append overlapping trees")
     return new Tree(this.type, this.children.concat(other.children), this.positions.concat(other.positions), other.length)
   }
 
