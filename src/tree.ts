@@ -684,7 +684,7 @@ class BufferNode implements SyntaxNode {
     let {buffer} = this.context
     let parentStart = this._parent ? this._parent.index + 4 : 0
     if (this.index == parentStart) return this.externalSibling(-1)
-    return new BufferNode(this.context, this._parent, buffer.findChild(parentStart, this.index, -1, -1))
+    return new BufferNode(this.context, this._parent, buffer.findChild(parentStart, this.index, -1, After.None))
   }
 
   get cursor() { return new TreeCursor(this) }
