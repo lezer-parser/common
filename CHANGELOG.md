@@ -1,3 +1,9 @@
+## 0.12.2 (2020-10-28)
+
+### Bug fixes
+
+Fix a bug that made `SyntaxNode.prevSibling` fail in most cases when the node is part of a buffer.
+
 ## 0.12.1 (2020-10-26)
 
 ### Bug fixes
