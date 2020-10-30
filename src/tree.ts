@@ -66,7 +66,11 @@ export class NodeProp<T> {
   /// if the node type doesn't get this prop, and the prop's value if
   /// it does.
   add(match: {[selector: string]: T} | ((type: NodeType) => T | undefined)): NodePropSource {
-    return new NodePropSource(this, typeof match == "function" ? match : NodeType.match(match))
+    if (typeof match != "function") match = NodeType.match(match)
+    return (type) => {
+      let result = (match as (type: NodeType) => T | undefined)(type)
+      return result === undefined ? null : [this, result]
+    }
   }
 
   /// Prop that is used to describe matching delimiters. For opening
@@ -88,14 +92,7 @@ export class NodeProp<T> {
 
 /// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
 /// the way a prop should be added to each node type in a node group.
-export class NodePropSource {
-  /// @internal
-  constructor(
-    /// @internal
-    readonly prop: NodeProp<any>,
-    /// @internal
-    readonly f: (type: NodeType) => any) {}
-}
+export type NodePropSource = (type: NodeType) => null | [NodeProp<any>, any]
 
 /// Each node in a syntax tree has a node type associated with it.
 export class NodeType {
@@ -188,13 +185,10 @@ export class NodeGroup {
     for (let type of this.types) {
       let newProps = null
       for (let source of props) {
-        let value = source.f(type)
-        if (value !== undefined) {
-          if (!newProps) {
-            newProps = Object.create(null)
-            for (let prop in type.props) newProps[prop] = type.props[prop]
-          }
-          newProps[source.prop.id] = value
+        let add = source(type)
+        if (add) {
+          if (!newProps) newProps = Object.assign({}, type.props)
+          add[0].set(newProps, add[1])
         }
       }
       newTypes.push(newProps ? new NodeType(type.name, newProps, type.id, type.flags) : type)
