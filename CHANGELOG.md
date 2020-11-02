@@ -1,3 +1,9 @@
+## 0.12.3 (2020-11-02)
+
+### New features
+
+Make `NodePropSource` a function type.
+
 ## 0.12.2 (2020-10-28)
 
 ### Bug fixes
