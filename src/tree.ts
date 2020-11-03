@@ -130,10 +130,13 @@ export class NodeType {
 
   /// Returns true when this node's name or one of its
   /// [groups](#tree.NodeProp^group) matches the given string.
-  is(name: string) {
-    if (this.name == name) return true
-    let group = this.prop(NodeProp.group)
-    return group ? group.indexOf(name) > -1 : false
+  is(name: string | number) {
+    if (typeof name == 'string') {
+      if (this.name == name) return true
+      let group = this.prop(NodeProp.group)
+      return group ? group.indexOf(name) > -1 : false
+    }
+    return this.id == name
   }
 
   /// An empty dummy node type to use when no actual type is available.
@@ -531,11 +534,11 @@ export interface SyntaxNode {
   /// return children that occur somewhere after a node with that name
   /// or group. If `after` is non-null, only return children that
   /// occur somewhere before a node with that name or group.
-  getChild(type: string, before?: string | null, after?: string | null): SyntaxNode | null
+  getChild(type: string | number, before?: string | number | null, after?: string | number | null): SyntaxNode | null
 
   /// Like [`getChild`](#tree.SyntaxNode.getChild), but return all
   /// matching children, not just the first.
-  getChildren(type: string, before?: string | null, after?: string | null): SyntaxNode[]
+  getChildren(type: string | number, before?: string | number | null, after?: string | number | null): SyntaxNode[]
 }
 
 class TreeNode implements SyntaxNode {
@@ -599,12 +602,12 @@ class TreeNode implements SyntaxNode {
     return this.cursor.moveTo(pos, side).node
   }
 
-  getChild(type: string, before: string | null = null, after: string | null = null) {
+  getChild(type: string | number, before: string | number | null = null, after: string | number | null = null) {
     let r = getChildren(this, type, before, after)
     return r.length ? r[0] : null
   }
 
-  getChildren(type: string, before: string | null = null, after: string | null = null) {
+  getChildren(type: string | number, before: string | number | null = null, after: string | number | null = null) {
     return getChildren(this, type, before, after)
   }
 
@@ -612,7 +615,7 @@ class TreeNode implements SyntaxNode {
   toString() { return this.node.toString() }
 }
 
-function getChildren(node: SyntaxNode, type: string, before: string | null, after: string | null): SyntaxNode[] {
+function getChildren(node: SyntaxNode, type: string | number, before: string | number | null, after: string | number | null): SyntaxNode[] {
   let cur = node.cursor, result: SyntaxNode[] = []
   if (!cur.firstChild()) return result
   if (before != null) while (!cur.type.is(before)) if (!cur.nextSibling()) return result
@@ -690,12 +693,12 @@ class BufferNode implements SyntaxNode {
   /// @internal
   toString() { return this.context.buffer.childString(this.index) }
 
-  getChild(type: string, before: string | null = null, after: string | null = null) {
+  getChild(type: string | number, before: string | number | null = null, after: string | number | null = null) {
     let r = getChildren(this, type, before, after)
     return r.length ? r[0] : null
   }
 
-  getChildren(type: string, before: string | null = null, after: string | null = null) {
+  getChildren(type: string | number, before: string | number | null = null, after: string | number | null = null) {
     return getChildren(this, type, before, after)
   }
 }
