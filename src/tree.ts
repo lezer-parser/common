@@ -311,9 +311,16 @@ export class Tree {
     let cursor = new TreeCursor(scope)
     if (pos != null) {
       cursor.moveTo(pos, side)
-      CachedNode.set(this, cursor.tree)
+      CachedNode.set(this, cursor._tree)
     }
     return cursor
+  }
+
+  /// Get a [tree cursor](#tree.TreeCursor) that, unlike regular
+  /// cursors, doesn't skip [anonymous](#tree.NodeType.isAnonymous)
+  /// nodes.
+  fullCursor(): TreeCursor {
+    return new TreeCursor(this.topNode as TreeNode, true)
   }
 
   /// Get a [syntax node](#tree.SyntaxNode) object for the top of the
@@ -556,7 +563,7 @@ class TreeNode implements SyntaxNode {
 
   get to() { return this.from + this.node.length }
 
-  nextChild(i: number, dir: 1 | -1, after: number): TreeNode | BufferNode | null {
+  nextChild(i: number, dir: 1 | -1, after: number, full = false): TreeNode | BufferNode | null {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
         let next = children[i], start = positions[i] + parent.from
@@ -565,12 +572,12 @@ class TreeNode implements SyntaxNode {
         if (next instanceof TreeBuffer) {
           let index = next.findChild(0, next.buffer.length, dir, after == After.None ? After.None : after - start)
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
-        } else if (!next.type.isAnonymous || hasChild(next)) {
+        } else if (full || (!next.type.isAnonymous || hasChild(next))) {
           let inner = new TreeNode(next, start, i, parent)
-          return !inner.type.isAnonymous ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
+          return full || !inner.type.isAnonymous ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
         }
       }
-      if (!parent.type.isAnonymous) return null
+      if (full || !parent.type.isAnonymous) return null
       i = parent.index + dir
       parent = parent._parent!
     }
@@ -582,14 +589,14 @@ class TreeNode implements SyntaxNode {
   childAfter(pos: number) { return this.nextChild(0, 1, pos) }
   childBefore(pos: number) { return this.nextChild(this.node.children.length - 1, -1, pos) }
 
-  nextSignificant() {
+  nextSignificantParent() {
     let val: TreeNode = this
     while (val.type.isAnonymous) val = val._parent!
     return val
   }
 
   get parent() {
-    return this._parent ? this._parent.nextSignificant() : null
+    return this._parent ? this._parent.nextSignificantParent() : null
   }
 
   get nextSibling() {
@@ -665,7 +672,7 @@ class BufferNode implements SyntaxNode {
   childBefore(pos: number) { return this.child(-1, pos) }
 
   get parent() {
-    return this._parent || this.context.parent.nextSignificant()
+    return this._parent || this.context.parent.nextSignificantParent()
   }
 
   externalSibling(dir: 1 | -1) {
@@ -722,18 +729,18 @@ export class TreeCursor {
   to!: number
 
   /// @internal
-  tree!: TreeNode
+  _tree!: TreeNode
   private buffer: BufferContext | null = null
   private stack: number[] = []
   private index: number = 0
   private bufferNode: BufferNode | null = null
 
   /// @internal
-  constructor(node: TreeNode | BufferNode) {
+  constructor(node: TreeNode | BufferNode, readonly full = false) {
     if (node instanceof TreeNode) {
       this.yieldNode(node)
     } else {
-      this.tree = node.context.parent
+      this._tree = node.context.parent
       this.buffer = node.context
       for (let n: BufferNode | null = node._parent; n; n = n._parent) this.stack.unshift(n.index)
       this.bufferNode = node
@@ -743,7 +750,7 @@ export class TreeCursor {
 
   private yieldNode(node: TreeNode | null) {
     if (!node) return false
-    this.tree = node
+    this._tree = node
     this.type = node.type
     this.from = node.from
     this.to = node.to
@@ -771,13 +778,13 @@ export class TreeCursor {
 
   /// @internal
   toString() {
-    return this.buffer ? this.buffer.buffer.childString(this.index) : this.tree.toString()
+    return this.buffer ? this.buffer.buffer.childString(this.index) : this._tree.toString()
   }
 
   /// @internal
   enter(dir: 1 | -1, after: number) {
     if (!this.buffer)
-      return this.yield(this.tree.nextChild(dir < 0 ? this.tree.node.children.length - 1 : 0, dir, after))
+      return this.yield(this._tree.nextChild(dir < 0 ? this._tree.node.children.length - 1 : 0, dir, after, this.full))
 
     let {buffer} = this.buffer
     let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], dir,
@@ -802,9 +809,9 @@ export class TreeCursor {
 
   /// Move the node's parent node, if this isn't the top node.
   parent() {
-    if (!this.buffer) return this.yieldNode(this.tree.parent)
+    if (!this.buffer) return this.yieldNode(this.full ? this._tree._parent : this._tree.parent)
     if (this.stack.length) return this.yieldBuf(this.stack.pop()!)
-    let parent = this.buffer.parent.nextSignificant()
+    let parent = this.full ? this.buffer.parent : this.buffer.parent.nextSignificantParent()
     this.buffer = null
     return this.yieldNode(parent)
   }
@@ -812,7 +819,8 @@ export class TreeCursor {
   /// @internal
   sibling(dir: 1 | -1) {
     if (!this.buffer)
-      return this.tree._parent ? this.yield(this.tree._parent.nextChild(this.tree.index + dir, dir, After.None)) : false
+      return !this._tree._parent ? false
+        : this.yield(this._tree._parent.nextChild(this._tree.index + dir, dir, After.None, this.full))
 
     let {buffer} = this.buffer, d = this.stack.length - 1
     if (dir < 0) {
@@ -824,7 +832,7 @@ export class TreeCursor {
       if (after < (d < 0 ? buffer.buffer.length : buffer.buffer[this.stack[d] + 3]))
         return this.yieldBuf(after)
     }
-    return d < 0 ? this.yield(this.buffer.parent.nextChild(this.buffer.index + dir, dir, After.None)) : false
+    return d < 0 ? this.yield(this.buffer.parent.nextChild(this.buffer.index + dir, dir, After.None, this.full)) : false
   }
 
   /// Move to this node's next sibling, if any.
@@ -843,12 +851,12 @@ export class TreeCursor {
       }
       ;({index, parent} = buffer)
     } else {
-      ({index, _parent: parent} = this.tree)
+      ({index, _parent: parent} = this._tree)
     }
     for (; parent; {index, _parent: parent} = parent) {
       for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
-        if (!child.type.isAnonymous || child instanceof TreeBuffer || hasChild(child)) return false
+        if (this.full || !child.type.isAnonymous || child instanceof TreeBuffer || hasChild(child)) return false
       }
     }
     return true
@@ -901,7 +909,7 @@ export class TreeCursor {
   /// Get a [syntax node](#tree.SyntaxNode) at the cursor's current
   /// position.
   get node(): SyntaxNode {
-    if (!this.buffer) return this.tree
+    if (!this.buffer) return this._tree
     
     let cache = this.bufferNode, result: BufferNode | null = null, depth = 0
     if (cache && cache.context == this.buffer) {
@@ -917,6 +925,13 @@ export class TreeCursor {
     }
     for (let i = depth; i < this.stack.length; i++) result = new BufferNode(this.buffer, result, this.stack[i])
     return this.bufferNode = new BufferNode(this.buffer, result, this.index)
+  }
+
+  /// Get the [tree](#tree.Tree) that represents the current node, if
+  /// any. Will return null when the node is in a [tree
+  /// buffer](#tree.TreeBuffer).
+  get tree(): Tree | null {
+    return this.buffer ? null : this._tree.node
   }
 }
 

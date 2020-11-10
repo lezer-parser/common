@@ -48,6 +48,13 @@ function simple() {
   return _simple || (_simple = mk("aaaa(bbb[ccc][aaa][()])"))
 }
 
+const anonTree = new Tree(group.types[0], [
+  new Tree(NodeType.none, [
+    new Tree(group.types[1], [], [], 1),
+    new Tree(group.types[2], [], [], 1)
+  ], [0, 1], 2),
+], [0], 2)
+
 describe("SyntaxNode", () => {
   it("can resolve at the top level", () => {
     let c = simple().resolve(2, -1)
@@ -113,6 +120,14 @@ describe("SyntaxNode", () => {
       ist(flat(last.getChildren("c", "b", null)), "c,c")
       ist(flat(last.getChildren("b", "c")), "")
     })
+  })
+
+  it("skips anonymous nodes", () => {
+    ist(anonTree + "", "T(a,b)")
+    ist(anonTree.resolve(1).name, "T")
+    ist(anonTree.topNode.lastChild.name, "b")
+    ist(anonTree.topNode.firstChild.name, "a")
+    ist(anonTree.topNode.childAfter(1).name, "b")
   })
 })
 
@@ -254,5 +269,28 @@ describe("TreeCursor", () => {
     ist(cur.node.parent, n10.parent)
     cur.parent()
     ist(cur.node, n10.parent)
+  })
+
+  it("skips anonymous nodes", () => {
+    let c = anonTree.cursor()
+    c.moveTo(1)
+    ist(c.name, "T")
+    c.firstChild()
+    ist(c.name, "a")
+    c.nextSibling()
+    ist(c.name, "b")
+    ist(!c.next())
+  })
+
+  it("stops at anonymous nodes when configured as full", () => {
+    let c = anonTree.fullCursor()
+    c.moveTo(1)
+    console.log(c.type)
+    ist(c.type, NodeType.none)
+    ist(c.tree!.length, 2)
+    c.firstChild()
+    ist(c.name, "a")
+    c.parent()
+    ist(c.type, NodeType.none)
   })
 })
