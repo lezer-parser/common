@@ -404,6 +404,9 @@ type BuildData = {
   group: NodeGroup,
   /// The id of the top node type, if any.
   topID?: number,
+  /// The length of the wrapping node. The end offset of the last
+  /// child is used when not provided.
+  length?: number,
   /// The maximum buffer length to use. Defaults to
   /// [`DefaultBufferLength`](#tree.DefaultBufferLength).
   maxBufferLength?: number,
@@ -1071,7 +1074,7 @@ function buildTree(data: BuildData) {
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions, -1)
-  let length = children.length ? positions[0] + children[0].length : 0
+  let length = data.length ?? (children.length ? positions[0] + children[0].length : 0)
   return new Tree(group.types[topID], children.reverse(), positions.reverse(), length)
 }
 
