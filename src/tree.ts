@@ -59,9 +59,9 @@ export class NodeProp<T> {
   }
 
   /// This is meant to be used with
-  /// [`NodeGroup.extend`](#tree.NodeGroup.extend) or
+  /// [`NodeSet.extend`](#tree.NodeSet.extend) or
   /// [`Parser.withProps`](#lezer.Parser.withProps) to compute prop
-  /// values for each node type in the group. Takes a [match
+  /// values for each node type in the set. Takes a [match
   /// object](#tree.NodeType^match) or function that returns undefined
   /// if the node type doesn't get this prop, and the prop's value if
   /// it does.
@@ -91,7 +91,7 @@ export class NodeProp<T> {
 }
 
 /// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
-/// the way a prop should be added to each node type in a node group.
+/// the way a prop should be added to each node type in a node set.
 export type NodePropSource = (type: NodeType) => null | [NodeProp<any>, any]
 
 // Note: this is duplicated in lezer/src/constants.ts
@@ -110,12 +110,12 @@ export class NodeType {
   constructor(
     /// The name of the node type. Not necessarily unique, but if the
     /// grammar was written properly, different node types with the
-    /// same name within a node group should play the same semantic
+    /// same name within a node set should play the same semantic
     /// role.
     readonly name: string,
     /// @internal
     readonly props: {readonly [prop: number]: any},
-    /// The id of this node in its group. Corresponds to the term ids
+    /// The id of this node in its set. Corresponds to the term ids
     /// used in the parser.
     readonly id: number,
     /// @internal
@@ -123,7 +123,7 @@ export class NodeType {
 
   static define(spec: {
     /// The ID of the node type. When this type is used in a
-    /// [set](#tree.NodeGroup), the ID must correspond to its index in
+    /// [set](#tree.NodeSet), the ID must correspond to its index in
     /// the type array.
     id: number, 
     /// The name of the node type. Leave empty to define an anonymous
@@ -201,29 +201,29 @@ export class NodeType {
   }
 }
 
-/// A node group holds a collection of node types. It is used to
+/// A node set holds a collection of node types. It is used to
 /// compactly represent trees by storing their type ids, rather than a
 /// full pointer to the type object, in a number array. Each parser
-/// [has](#lezer.Parser.group) a node group, and [tree
+/// [has](#lezer.Parser.nodeSet) a node set, and [tree
 /// buffers](#tree.TreeBuffer) can only store collections of nodes
-/// from the same group. A group can have a maximum of 2**16 (65536)
+/// from the same set. A set can have a maximum of 2**16 (65536)
 /// node types in it, so that the ids fit into 16-bit typed array
 /// slots.
-export class NodeGroup {
-  /// Create a group with the given types. The `id` property of each
+export class NodeSet {
+  /// Create a set with the given types. The `id` property of each
   /// type should correspond to its position within the array.
   constructor(
-    /// The node types in this group, by id.
+    /// The node types in this set, by id.
     readonly types: readonly NodeType[]
   ) {
     for (let i = 0; i < types.length; i++) if (types[i].id != i)
-      throw new RangeError("Node type ids should correspond to array positions when creating a node group")
+      throw new RangeError("Node type ids should correspond to array positions when creating a node set")
   }
 
-  /// Create a copy of this group with some node properties added. The
+  /// Create a copy of this set with some node properties added. The
   /// arguments to this method should be created with
   /// [`NodeProp.add`](#tree.NodeProp.add).
-  extend(...props: NodePropSource[]): NodeGroup {
+  extend(...props: NodePropSource[]): NodeSet {
     let newTypes: NodeType[] = []
     for (let type of this.types) {
       let newProps = null
@@ -236,7 +236,7 @@ export class NodeGroup {
       }
       newTypes.push(newProps ? new NodeType(type.name, newProps, type.id, type.flags) : type)
     }
-    return new NodeGroup(newTypes)
+    return new NodeSet(newTypes)
   }
 }
 
@@ -432,7 +432,7 @@ type BuildData = {
   /// node in the tree.
   ///
   ///  - The first holds the node's type, as a node ID pointing into
-  ///    the given `NodeGroup`.
+  ///    the given `NodeSet`.
   ///  - The second holds the node's start offset.
   ///  - The third the end offset.
   ///  - The fourth the amount of space taken up in the array by this
@@ -448,7 +448,7 @@ type BuildData = {
   ///     [11, 0, 1, 4, 12, 2, 4, 4, 10, 0, 4, 12]
   buffer: BufferCursor | readonly number[],
   /// The node types to use.
-  group: NodeGroup,
+  nodeSet: NodeSet,
   /// The id of the top node type, if any.
   topID?: number,
   /// The length of the wrapping node. The end offset of the last
@@ -476,7 +476,7 @@ export class TreeBuffer {
     // The total length of the group of nodes in the buffer.
     readonly length: number,
     /// @internal
-    readonly group: NodeGroup,
+    readonly set: NodeSet,
     readonly type = NodeType.none
   ) {}
 
@@ -493,7 +493,7 @@ export class TreeBuffer {
   /// @internal
   childString(index: number): string {
     let id = this.buffer[index], endIndex = this.buffer[index + 3]
-    let type = this.group.types[id], result = type.name
+    let type = this.set.types[id], result = type.name
     if (/\W/.test(result) && !type.isError) result = JSON.stringify(result)
     index += 4
     if (endIndex == index) return result
@@ -516,7 +516,7 @@ export class TreeBuffer {
       newBuffer[i + 2] = Math.min(at, this.buffer[i + 2])
       newBuffer[i + 3] = Math.min(this.buffer[i + 3], cutPoint)
     }
-    return new TreeBuffer(newBuffer, Math.min(at, this.length), this.group)
+    return new TreeBuffer(newBuffer, Math.min(at, this.length), this.set)
   }
 
   /// @internal
@@ -695,7 +695,7 @@ class BufferNode implements SyntaxNode {
   constructor(readonly context: BufferContext,
               readonly _parent: BufferNode | null,
               readonly index: number) {
-    this.type = context.buffer.group.types[context.buffer.buffer[index]]
+    this.type = context.buffer.set.types[context.buffer.buffer[index]]
   }
 
   child(dir: 1 | -1, after: number): BufferNode | null {
@@ -800,7 +800,7 @@ export class TreeCursor {
   private yieldBuf(index: number, type?: NodeType) {
     this.index = index
     let {start, buffer} = this.buffer!
-    this.type = type || buffer.group.types[buffer.buffer[index]]
+    this.type = type || buffer.set.types[buffer.buffer[index]]
     this.from = start + buffer.buffer[index + 1]
     this.to = start + buffer.buffer[index + 2]
     return true
@@ -1020,12 +1020,12 @@ class FlatBufferCursor implements BufferCursor {
 const BalanceBranchFactor = 8
 
 function buildTree(data: BuildData) {
-  let {buffer, group, topID = 0,
+  let {buffer, nodeSet, topID = 0,
        maxBufferLength = DefaultBufferLength,
        reused = [],
-       minRepeatType = group.types.length} = data as BuildData
+       minRepeatType = nodeSet.types.length} = data as BuildData
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
-  let types = group.types
+  let types = nodeSet.types
   function takeNode(parentStart: number, minPos: number,
                     children: (Tree | TreeBuffer)[], positions: number[],
                     inRepeat: number) {
@@ -1047,7 +1047,7 @@ function buildTree(data: BuildData) {
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
         index = copyToBuffer(buffer.start, data, index, inRepeat)
-      node = new TreeBuffer(data, end - buffer.start, group, inRepeat < 0 ? NodeType.none : types[inRepeat])
+      node = new TreeBuffer(data, end - buffer.start, nodeSet, inRepeat < 0 ? NodeType.none : types[inRepeat])
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
@@ -1130,7 +1130,7 @@ function buildTree(data: BuildData) {
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(0, 0, children, positions, -1)
   let length = data.length ?? (children.length ? positions[0] + children[0].length : 0)
-  return new Tree(group.types[topID], children.reverse(), positions.reverse(), length)
+  return new Tree(types[topID], children.reverse(), positions.reverse(), length)
 }
 
 function balanceRange(outerType: NodeType, innerType: NodeType,

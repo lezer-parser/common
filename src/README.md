@@ -12,7 +12,7 @@
 
 @NodeType
 
-@NodeGroup
+@NodeSet
 
 @NodeProp
 
