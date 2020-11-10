@@ -94,6 +94,16 @@ export class NodeProp<T> {
 /// the way a prop should be added to each node type in a node group.
 export type NodePropSource = (type: NodeType) => null | [NodeProp<any>, any]
 
+// Note: this is duplicated in lezer/src/constants.ts
+const enum NodeFlag {
+  Top = 1,
+  Skipped = 2,
+  Error = 4,
+  Anonymous = 8
+}
+
+const noProps: {[propID: number]: any} = Object.create(null)
+
 /// Each node in a syntax tree has a node type associated with it.
 export class NodeType {
   /// @internal
@@ -111,22 +121,52 @@ export class NodeType {
     /// @internal
     readonly flags: number = 0) {}
 
+  static define(spec: {
+    /// The ID of the node type. When this type is used in a
+    /// [set](#tree.NodeGroup), the ID must correspond to its index in
+    /// the type array.
+    id: number, 
+    /// The name of the node type. Leave empty to define an anonymous
+    /// node.
+    name?: string,
+    /// [Node props](#tree.NodeProp) to assign to the type. The value
+    /// given for any given prop should correspond to the prop's type.
+    props?: readonly [NodeProp<any>, any][],
+    /// Whether is is a [top node](#tree.NodeType.isTop).
+    top?: boolean,
+    /// Whether this node counts as an [error
+    /// node](#tree.NodeType.isError).
+    error?: boolean,
+    /// Whether this node is a [skipped](#tree.NodeType.isSkipped)
+    /// node.
+    skipped?: boolean
+  }) {
+    let props = noProps
+    if (spec.props && spec.props.length) {
+      props = Object.create(null)
+      for (let [p, v] of spec.props) p.set(props, v)
+    }
+    let flags = (spec.top ? NodeFlag.Top : 0) | (spec.skipped ? NodeFlag.Skipped : 0) |
+      (spec.error ? NodeFlag.Error : 0) | (spec.name == null ? NodeFlag.Anonymous : 0)
+    return new NodeType(spec.name || "", props, spec.id, flags)
+  }
+
   /// Retrieves a node prop for this type. Will return `undefined` if
   /// the prop isn't present on this node.
   prop<T>(prop: NodeProp<T>): T | undefined { return this.props[prop.id] }
 
   /// True when this is the top node of a grammar.
-  get isTop() { return (this.flags & 1) > 0 }
+  get isTop() { return (this.flags & NodeFlag.Top) > 0 }
 
   /// True when this node is produced by a skip rule.
-  get isSkipped() { return (this.flags & 2) > 0 }
+  get isSkipped() { return (this.flags & NodeFlag.Skipped) > 0 }
 
   /// Indicates whether this is an error node.
-  get isError() { return (this.flags & 4) > 0 }
+  get isError() { return (this.flags & NodeFlag.Error) > 0 }
 
   /// When true, this node type doesn't correspond to a user-declared
   /// named node, for example because it is used to cache repetition.
-  get isAnonymous() { return (this.flags & 8) > 0 }
+  get isAnonymous() { return (this.flags & NodeFlag.Anonymous) > 0 }
 
   /// Returns true when this node's name or one of its
   /// [groups](#tree.NodeProp^group) matches the given string.
@@ -140,7 +180,7 @@ export class NodeType {
   }
 
   /// An empty dummy node type to use when no actual type is available.
-  static none: NodeType = new NodeType("", Object.create(null), 0, 8)
+  static none: NodeType = new NodeType("", Object.create(null), 0, NodeFlag.Anonymous)
 
   /// Create a function from node types to arbitrary values by
   /// specifying an object whose property names are node or

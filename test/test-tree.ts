@@ -1,9 +1,12 @@
 import {Tree, NodeGroup, NodeType, SyntaxNode, NodeProp} from ".."
 import ist from "ist"
 
-let types = "T a b c Pa Br".split(" ")
-  .map((s, i) => new (NodeType as any)(s, /^[abc]$/.test(s) ? NodeProp.group.set({}, ["atom"]) : {}, i))
-let repeat = new (NodeType as any)("", {}, types.length, 8)
+let types = "T a b c Pa Br".split(" ").map((s, i) => NodeType.define({
+  id: i,
+  name: s,
+  props: /^[abc]$/.test(s) ? [[NodeProp.group, ["atom"]]] : []
+}))
+let repeat = NodeType.define({id: types.length})
 types.push(repeat)
 let group = new NodeGroup(types)
 
@@ -285,7 +288,6 @@ describe("TreeCursor", () => {
   it("stops at anonymous nodes when configured as full", () => {
     let c = anonTree.fullCursor()
     c.moveTo(1)
-    console.log(c.type)
     ist(c.type, NodeType.none)
     ist(c.tree!.length, 2)
     c.firstChild()
