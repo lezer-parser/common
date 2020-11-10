@@ -124,9 +124,9 @@ export class NodeType {
   /// Indicates whether this is an error node.
   get isError() { return (this.flags & 4) > 0 }
 
-  /// When true, this node type is used to cache repetition, and is
-  /// not a user-defined named node.
-  get isRepeated() { return (this.flags & 8) > 0 }
+  /// When true, this node type doesn't correspond to a user-declared
+  /// named node, for example because it is used to cache repetition.
+  get isAnonymous() { return (this.flags & 8) > 0 }
 
   /// Returns true when this node's name or one of its
   /// [groups](#tree.NodeProp^group) matches the given string.
@@ -140,7 +140,7 @@ export class NodeType {
   }
 
   /// An empty dummy node type to use when no actual type is available.
-  static none: NodeType = new NodeType("", Object.create(null), 0)
+  static none: NodeType = new NodeType("", Object.create(null), 0, 8)
 
   /// Create a function from node types to arbitrary values by
   /// specifying an object whose property names are node or
@@ -345,7 +345,7 @@ export class Tree {
     let {enter, leave, from = 0, to = this.length} = spec
     for (let c = this.cursor();;) {
       let mustLeave = false
-      if (c.from <= to && c.to >= from && (c.type.isRepeated || enter(c.type, c.from, c.to) !== false)) {
+      if (c.from <= to && c.to >= from && (c.type.isAnonymous || enter(c.type, c.from, c.to) !== false)) {
         if (c.firstChild()) continue
         mustLeave = true
       }
@@ -565,12 +565,12 @@ class TreeNode implements SyntaxNode {
         if (next instanceof TreeBuffer) {
           let index = next.findChild(0, next.buffer.length, dir, after == After.None ? After.None : after - start)
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
-        } else if (!next.type.isRepeated || hasChild(next)) {
+        } else if (!next.type.isAnonymous || hasChild(next)) {
           let inner = new TreeNode(next, start, i, parent)
-          return !inner.type.isRepeated ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
+          return !inner.type.isAnonymous ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
         }
       }
-      if (!parent.type.isRepeated) return null
+      if (!parent.type.isAnonymous) return null
       i = parent.index + dir
       parent = parent._parent!
     }
@@ -584,7 +584,7 @@ class TreeNode implements SyntaxNode {
 
   nextSignificant() {
     let val: TreeNode = this
-    while (val.type.isRepeated) val = val._parent!
+    while (val.type.isAnonymous) val = val._parent!
     return val
   }
 
@@ -848,7 +848,7 @@ export class TreeCursor {
     for (; parent; {index, _parent: parent} = parent) {
       for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
-        if (!child.type.isRepeated || child instanceof TreeBuffer || hasChild(child)) return false
+        if (!child.type.isAnonymous || child instanceof TreeBuffer || hasChild(child)) return false
       }
     }
     return true
@@ -921,7 +921,7 @@ export class TreeCursor {
 }
 
 function hasChild(tree: Tree): boolean {
-  return tree.children.some(ch => !ch.type.isRepeated || ch instanceof TreeBuffer || hasChild(ch))
+  return tree.children.some(ch => !ch.type.isAnonymous || ch instanceof TreeBuffer || hasChild(ch))
 }
 
 /// This is used by `Tree.build` as an abstraction for iterating over
