@@ -131,7 +131,7 @@ export class NodeType {
     name?: string,
     /// [Node props](#tree.NodeProp) to assign to the type. The value
     /// given for any given prop should correspond to the prop's type.
-    props?: readonly [NodeProp<any>, any][],
+    props?: readonly ([NodeProp<any>, any] | NodePropSource)[],
     /// Whether is is a [top node](#tree.NodeType.isTop).
     top?: boolean,
     /// Whether this node counts as an [error
@@ -141,14 +141,15 @@ export class NodeType {
     /// node.
     skipped?: boolean
   }) {
-    let props = noProps
-    if (spec.props && spec.props.length) {
-      props = Object.create(null)
-      for (let [p, v] of spec.props) p.set(props, v)
-    }
+    let props = spec.props && spec.props.length ? Object.create(null) : noProps
     let flags = (spec.top ? NodeFlag.Top : 0) | (spec.skipped ? NodeFlag.Skipped : 0) |
       (spec.error ? NodeFlag.Error : 0) | (spec.name == null ? NodeFlag.Anonymous : 0)
-    return new NodeType(spec.name || "", props, spec.id, flags)
+    let type = new NodeType(spec.name || "", props, spec.id, flags)
+    if (spec.props) for (let src of spec.props) {
+      if (!Array.isArray(src)) src = src(type)!
+      if (src) src[0].set(props, src[1])
+    }
+    return type
   }
 
   /// Retrieves a node prop for this type. Will return `undefined` if
