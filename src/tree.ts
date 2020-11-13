@@ -1,18 +1,6 @@
 /// The default maximum length of a `TreeBuffer` node.
 export const DefaultBufferLength = 1024
 
-/// The `unchanged` method expects changed ranges in this format.
-export interface ChangedRange {
-  /// The start of the change in the start document
-  fromA: number
-  /// The end of the change in the start document
-  toA: number
-  /// The start of the replacement in the new document
-  fromB: number
-  /// The end of the replacement in the new document
-  toB: number
-}
-
 let nextPropID = 0
 
 const CachedNode = new WeakMap<Tree, TreeNode>()
@@ -276,55 +264,6 @@ export class Tree {
     return !this.type.name ? children :
       (/\W/.test(this.type.name) && !this.type.isError ? JSON.stringify(this.type.name) : this.type.name) +
       (children.length ? "(" + children + ")" : "")
-  }
-
-  private partial(start: number, end: number, offset: number, children: (Tree | TreeBuffer)[], positions: number[]) {
-    for (let i = 0; i < this.children.length; i++) {
-      let from = this.positions[i]
-      if (from > end) break
-      let child = this.children[i], to = from + child.length
-      if (to < start) continue
-      if (start <= from && end >= to) {
-        children.push(child)
-        positions.push(from + offset)
-      } else if (child instanceof Tree) {
-        child.partial(start - from, end - from, offset + from, children, positions)
-      }
-    }
-  }
-
-  /// Apply a set of edits to a tree, removing all nodes that were
-  /// touched by the edits, and moving remaining nodes so that their
-  /// positions are updated for insertions/deletions before them. This
-  /// is likely to destroy a lot of the structure of the tree, and
-  /// mostly useful for extracting the nodes that can be reused in a
-  /// subsequent incremental re-parse.
-  applyChanges(changes: readonly ChangedRange[]) {
-    if (changes.length == 0) return this
-    let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
-
-    function cutAt(tree: Tree, pos: number, side: 1 | -1) {
-      let cursor: TreeCursor = tree.cursor(pos, -side as 1 | -1)
-      for (;;) {
-        if (!cursor.enter(side, pos)) for (;;) {
-          if ((side < 0 ? cursor.to <= pos : cursor.from >= pos) && !cursor.type.isError)
-            return side < 0 ? Math.min(pos, cursor.to - 1) : Math.max(pos, cursor.from + 1)
-          if (cursor.sibling(side)) break
-          if (!cursor.parent()) return side < 0 ? 0 : tree.length
-        }
-      }
-    }
-
-    let off = 0
-    for (let i = 0, pos = 0;; i++) {
-      let next = i == changes.length ? null : changes[i]
-      let nextPos = next ? cutAt(this, next.fromA, -1) : this.length
-      if (nextPos > pos) this.partial(pos, nextPos, off, children, positions)
-      if (!next) break
-      pos = cutAt(this, next.toA, 1)
-      off += (next.toB - next.fromB) - (next.toA - next.fromA)
-    }
-    return new Tree(NodeType.none, children, positions, this.length + off)
   }
 
   /// Take the part of the tree up to the given position.
@@ -1181,4 +1120,115 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
 function containsType(nodes: readonly (Tree | TreeBuffer)[], type: NodeType) {
   for (let elt of nodes) if (elt.type == type) return true
   return false
+}
+
+/// The [`TreeFragment.applyChanges`](#tree.TreeFragment^applyChanges)
+/// method expects changed ranges in this format.
+export interface ChangedRange {
+  /// The start of the change in the start document
+  fromA: number
+  /// The end of the change in the start document
+  toA: number
+  /// The start of the replacement in the new document
+  fromB: number
+  /// The end of the replacement in the new document
+  toB: number
+}
+
+/// Tree fragments are used during [incremental
+/// parsing](#lezer.ParseOptions.fragments) to track parts of old
+/// trees that can be reused in a new parse. An array of fragments is
+/// used to track regions of an old tree whose nodes might be reused
+/// in new parses. Use the static
+/// [`applyChanges`](#tree.TreeFragment^applyChanges) method to update
+/// fragments for document changes.
+export class TreeFragment {
+  constructor(
+    /// The start of the unchanged range pointed to by this fragment.
+    /// This refers to an offset in the _updated_ document (as opposed
+    /// to the original tree).
+    readonly from: number,
+    /// The end of the unchanged range.
+    readonly to: number,
+    /// The position from which it is safe to use this fragment's
+    /// content in an LR parse. Will be equal to `from` when this is
+    /// the start of a parse, or point one position beyond the first
+    /// non-error leaf node otherwise.
+    readonly safeFrom: number,
+    /// The position up to which it is safe to use this fragment's
+    /// content in an LR parse.
+    readonly safeTo: number,
+    /// The tree that this fragment is based on.
+    readonly tree: Tree,
+    /// The offset between the fragment's tree and the document that
+    /// this fragment can be used against. Add this when going from
+    /// document to tree positions, subtract it to go from tree to
+    /// document positions.
+    readonly offset: number
+  ) {}
+
+  // From/to are the _document_ positions to cut between. `offset` is
+  // the additional offset this change adds to the given region.
+  private cut(from: number, to: number, offset: number, openStart: boolean, openEnd: boolean) {
+    if (from < this.from && to > this.to && !offset) return this
+    let safeFrom = this.from <= from || openStart ? cutAt(this.tree, from + this.offset, 1) : this.safeFrom
+    let safeTo = this.to >= to || openEnd ? cutAt(this.tree, to + this.offset, -1) : this.safeTo
+    return safeFrom >= safeTo ? null
+      : new TreeFragment(Math.max(this.from, from) - offset, Math.min(this.to, to) - offset,
+                         safeFrom - offset, safeTo - offset, this.tree, this.offset + offset)
+  }
+
+  /// Apply a set of edits to an array of fragments, removing or
+  /// splitting fragments as necessary to remove edited ranges, and
+  /// adjusting offsets for fragments that moved.
+  static applyChanges(fragments: readonly TreeFragment[], changes: readonly ChangedRange[], minGap = 128) {
+    if (!changes.length) return fragments
+    let result: TreeFragment[] = []
+    let fI = 1, nextF = fragments.length ? fragments[0] : null
+    let cI = 0, pos = 0, off = 0
+    for (;;) {
+      let nextC = cI < changes.length ? changes[cI++] : null
+      let nextPos = nextC ? nextC.fromA : 1e9
+      if (nextPos - pos >= minGap) while (nextF && nextF.from < nextPos) {
+        let cut = nextF.cut(pos, nextPos, off, cI > 0, !!nextC)
+        if (cut) result.push(cut)
+        if (nextF.to > nextPos) break
+        nextF = fI < fragments.length ? fragments[fI++] : null
+      }
+      if (!nextC) break
+      pos = nextC.toA
+      off = nextC.toA - nextC.toB
+    }
+    return result
+  }
+
+  /// Create a set of fragments from a freshly parsed tree, or update
+  /// an existing set of fragments by replacing the ones that overlap
+  /// with a tree with content from the new tree. When `partial` is
+  /// true, the parse is treated as incomplete, and the token at its
+  /// end is not included in [`safeTo`](#tree.TreeFragment.safeTo).
+  static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
+    let result = [new TreeFragment(0, tree.length, 0, partial ? cutAt(tree, tree.length, -1) : tree.length, tree, 0)]
+    for (let f of fragments) {
+      if (f.safeFrom >= tree.length) {
+        result.push(f)
+      } else if (f.to > tree.length) {
+        let part = f.cut(tree.length, f.to, 0, false, true)
+        if (part) result.push(part)
+      }
+    }
+    return result
+  }
+}
+
+function cutAt(tree: Tree, pos: number, side: 1 | -1) {
+  let cursor: TreeCursor = tree.cursor(pos)
+  for (;;) {
+    if (!cursor.enter(side, pos)) for (;;) {
+      if ((side < 0 ? cursor.to <= pos : cursor.from >= pos) && !cursor.type.isError)
+        return side < 0 ? cursor.to - 1 : cursor.from + 1
+      if (cursor.sibling(side)) break
+      if (!cursor.parent()) return side < 0 ? 0 : tree.length
+    }
+  }
 }

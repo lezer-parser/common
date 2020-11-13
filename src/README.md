@@ -6,8 +6,6 @@
 
 @TreeCursor
 
-@ChangedRange
-
 ### Node types
 
 @NodeType
@@ -25,3 +23,9 @@
 @DefaultBufferLength
 
 @BufferCursor
+
+### Incremental parsing
+
+@ChangedRange
+
+@TreeFragment
