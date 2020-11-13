@@ -1,4 +1,4 @@
-import {Tree, NodeGroup, NodeType, SyntaxNode, NodeProp} from ".."
+import {Tree, NodeSet, NodeType, SyntaxNode, NodeProp} from ".."
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => NodeType.define({
@@ -8,7 +8,7 @@ let types = "T a b c Pa Br".split(" ").map((s, i) => NodeType.define({
 }))
 let repeat = NodeType.define({id: types.length})
 types.push(repeat)
-let group = new NodeGroup(types)
+let nodeSet = new NodeSet(types)
 
 function id(n: string) { return types.find(x => x.name == n)!.id }
 
@@ -29,7 +29,7 @@ function mk(spec: string) {
     }
     pos += m.length
   }
-  return Tree.build({buffer, group, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id})
+  return Tree.build({buffer, nodeSet, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id})
 }
 
 let _recur: Tree | null = null
@@ -51,10 +51,10 @@ function simple() {
   return _simple || (_simple = mk("aaaa(bbb[ccc][aaa][()])"))
 }
 
-const anonTree = new Tree(group.types[0], [
+const anonTree = new Tree(nodeSet.types[0], [
   new Tree(NodeType.none, [
-    new Tree(group.types[1], [], [], 1),
-    new Tree(group.types[2], [], [], 1)
+    new Tree(nodeSet.types[1], [], [], 1),
+    new Tree(nodeSet.types[2], [], [], 1)
   ], [0, 1], 2),
 ], [0], 2)
 
@@ -128,9 +128,9 @@ describe("SyntaxNode", () => {
   it("skips anonymous nodes", () => {
     ist(anonTree + "", "T(a,b)")
     ist(anonTree.resolve(1).name, "T")
-    ist(anonTree.topNode.lastChild.name, "b")
-    ist(anonTree.topNode.firstChild.name, "a")
-    ist(anonTree.topNode.childAfter(1).name, "b")
+    ist(anonTree.topNode.lastChild!.name, "b")
+    ist(anonTree.topNode.firstChild!.name, "a")
+    ist(anonTree.topNode.childAfter(1)!.name, "b")
   })
 })
 
