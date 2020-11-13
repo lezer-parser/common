@@ -1210,14 +1210,7 @@ export class TreeFragment {
   /// end is not included in [`safeTo`](#tree.TreeFragment.safeTo).
   static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
     let result = [new TreeFragment(0, tree.length, 0, partial ? cutAt(tree, tree.length, -1) : tree.length, tree, 0)]
-    for (let f of fragments) {
-      if (f.safeFrom >= tree.length) {
-        result.push(f)
-      } else if (f.to > tree.length) {
-        let part = f.cut(tree.length, f.to, 0, false, true)
-        if (part) result.push(part)
-      }
-    }
+    for (let f of fragments) if (f.to > tree.length) result.push(f)
     return result
   }
 }
