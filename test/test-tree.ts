@@ -172,6 +172,17 @@ describe("TreeCursor", () => {
     }
   })
 
+  it("handles iterating out of bounds", () => {
+    let hit = 0
+    Tree.empty.iterate({
+      from: 0,
+      to: 200,
+      enter() { hit++ },
+      leave() { hit++ }
+    })
+    ist(hit, 0)
+  })
+
   it("internal iteration can be limited to a range", () => {
     let seen: string[] = []
     simple().iterate({

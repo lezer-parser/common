@@ -560,6 +560,7 @@ class TreeNode implements SyntaxNode {
       if (full || !parent.type.isAnonymous) return null
       i = parent.index + dir
       parent = parent._parent!
+      if (!parent) return null
     }
   }
 
@@ -571,7 +572,7 @@ class TreeNode implements SyntaxNode {
 
   nextSignificantParent() {
     let val: TreeNode = this
-    while (val.type.isAnonymous) val = val._parent!
+    while (val.type.isAnonymous && val._parent) val = val._parent
     return val
   }
 
