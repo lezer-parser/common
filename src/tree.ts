@@ -334,10 +334,11 @@ export class Tree {
       let mustLeave = false
       if (c.from <= to && c.to >= from && (c.type.isAnonymous || enter(c.type, c.from, c.to) !== false)) {
         if (c.firstChild()) continue
-        mustLeave = true
+        if (!c.type.isAnonymous) mustLeave = true
       }
       for (;;) {
         if (mustLeave && leave) leave(c.type, c.from, c.to)
+        mustLeave = c.type.isAnonymous
         if (c.nextSibling()) break
         if (!c.parent()) return
         mustLeave = true
