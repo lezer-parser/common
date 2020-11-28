@@ -266,20 +266,6 @@ export class Tree {
       (children.length ? "(" + children + ")" : "")
   }
 
-  /// Take the part of the tree up to the given position.
-  cut(at: number): Tree {
-    if (at >= this.length) return this
-    let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
-    for (let i = 0; i < this.children.length; i++) {
-      let from = this.positions[i]
-      if (from >= at) break
-      let child = this.children[i], to = from + child.length
-      children.push(to <= at ? child : child.cut(at - from))
-      positions.push(from)
-    }
-    return new Tree(this.type, children, positions, at)
-  }
-
   /// The empty tree
   static empty = new Tree(NodeType.none, [], [], 0)
 
@@ -344,14 +330,6 @@ export class Tree {
         mustLeave = true
       }
     }
-  }
-
-  /// Append another tree to this tree. `other` must have empty space
-  /// big enough to fit this tree at its start.
-  append(other: Tree) {
-    if (!other.children.length) return this
-    if (other.positions[0] < this.length) throw new Error("Can't append overlapping trees")
-    return new Tree(this.type, this.children.concat(other.children), this.positions.concat(other.positions), other.length)
   }
 
   /// Balance the direct children of this tree.
@@ -446,20 +424,6 @@ export class TreeBuffer {
       index = this.buffer[index + 3]
     }
     return result + "(" + children.join(",") + ")"
-  }
-
-  /// @internal
-  cut(at: number) {
-    let cutPoint = 0
-    while (cutPoint < this.buffer.length && this.buffer[cutPoint + 1] < at) cutPoint += 4
-    let newBuffer = new Uint16Array(cutPoint)
-    for (let i = 0; i < cutPoint; i += 4) {
-      newBuffer[i] = this.buffer[i]
-      newBuffer[i + 1] = this.buffer[i + 1]
-      newBuffer[i + 2] = Math.min(at, this.buffer[i + 2])
-      newBuffer[i + 3] = Math.min(this.buffer[i + 3], cutPoint)
-    }
-    return new TreeBuffer(newBuffer, Math.min(at, this.length), this.set)
   }
 
   /// @internal
