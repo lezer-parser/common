@@ -1103,6 +1103,8 @@ export interface ChangedRange {
   toB: number
 }
 
+const enum Open { Start = 1, End = 2 }
+
 /// Tree fragments are used during [incremental
 /// parsing](#lezer.ParseOptions.fragments) to track parts of old
 /// trees that can be reused in a new parse. An array of fragments is
@@ -1118,33 +1120,19 @@ export class TreeFragment {
     readonly from: number,
     /// The end of the unchanged range.
     readonly to: number,
-    /// The position from which it is safe to use this fragment's
-    /// content in an LR parse. Will be equal to `from` when this is
-    /// the start of a parse, or point one position beyond the first
-    /// non-error leaf node otherwise.
-    readonly safeFrom: number,
-    /// The position up to which it is safe to use this fragment's
-    /// content in an LR parse.
-    readonly safeTo: number,
     /// The tree that this fragment is based on.
     readonly tree: Tree,
     /// The offset between the fragment's tree and the document that
     /// this fragment can be used against. Add this when going from
     /// document to tree positions, subtract it to go from tree to
     /// document positions.
-    readonly offset: number
+    readonly offset: number,
+    private open: number
   ) {}
 
-  // From/to are the _document_ positions to cut between. `offset` is
-  // the additional offset this change adds to the given region.
-  private cut(from: number, to: number, offset: number, openStart: boolean, openEnd: boolean) {
-    if (from < this.from && to > this.to && !offset) return this
-    let safeFrom = this.from <= from || openStart ? cutAt(this.tree, from + this.offset, 1) : this.safeFrom
-    let safeTo = this.to >= to || openEnd ? cutAt(this.tree, to + this.offset, -1) : this.safeTo
-    return safeFrom >= safeTo ? null
-      : new TreeFragment(Math.max(this.from, from) - offset, Math.min(this.to, to) - offset,
-                         safeFrom - offset, safeTo - offset, this.tree, this.offset + offset)
-  }
+  get openStart() { return (this.open & Open.Start) > 0 }
+
+  get openEnd() { return (this.open & Open.End) > 0 }
 
   /// Apply a set of edits to an array of fragments, removing or
   /// splitting fragments as necessary to remove edited ranges, and
@@ -1158,7 +1146,13 @@ export class TreeFragment {
       let nextC = cI < changes.length ? changes[cI++] : null
       let nextPos = nextC ? nextC.fromA : 1e9
       if (nextPos - pos >= minGap) while (nextF && nextF.from < nextPos) {
-        let cut = nextF.cut(pos, nextPos, off, cI > 0, !!nextC)
+        let cut: TreeFragment | null = nextF
+        if (pos >= cut.from || nextPos <= cut.to || off) {
+          let fFrom = Math.max(cut.from, pos) - off, fTo = Math.min(cut.to, nextPos) - off
+          cut = fFrom >= fTo ? null :
+            new TreeFragment(fFrom, fTo, cut.tree, cut.offset + off,
+                             (cI > 0 ? Open.Start : 0) | (nextC ? Open.End : 0))
+        }
         if (cut) result.push(cut)
         if (nextF.to > nextPos) break
         nextF = fI < fragments.length ? fragments[fI++] : null
@@ -1176,20 +1170,80 @@ export class TreeFragment {
   /// true, the parse is treated as incomplete, and the token at its
   /// end is not included in [`safeTo`](#tree.TreeFragment.safeTo).
   static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
-    let result = [new TreeFragment(0, tree.length, 0, partial ? cutAt(tree, tree.length, -1) : tree.length, tree, 0)]
+    let result = [new TreeFragment(0, tree.length, tree, 0, partial ? Open.End : 0)]
     for (let f of fragments) if (f.to > tree.length) result.push(f)
     return result
   }
 }
 
-function cutAt(tree: Tree, pos: number, side: 1 | -1) {
-  let cursor: TreeCursor = tree.cursor(pos)
-  for (;;) {
-    if (!cursor.enter(side, pos)) for (;;) {
-      if ((side < 0 ? cursor.to <= pos : cursor.from >= pos) && !cursor.type.isError)
-        return side < 0 ? cursor.to - 1 : cursor.from + 1
-      if (cursor.sibling(side)) break
-      if (!cursor.parent()) return side < 0 ? 0 : tree.length
-    }
+/// Interface that a parser that is used as a nested incremental
+/// parser must conform to.
+export interface IncrementalParse {
+  /// Advance the parse state by some amount.
+  advance(): Tree | null
+  /// The current parse position.
+  pos: number
+  /// Get the currently parsed content as a tree, even though the
+  /// parse hasn't finished yet.
+  forceFinish(): Tree
+}
+
+export interface ParseContext {
+  /// A set of fragments from a previous parse to be used for incremental
+  /// parsing. These should be aligned with the current document
+  /// (through a call to
+  /// [`TreeFragment.applyChanges`](#tree.TreeFragment^applyChanges))
+  /// if any changes were made since they were produced. The parser
+  /// will try to reuse nodes from the fragments in the new parse,
+  /// greatly speeding up the parse when it can do so for most of the
+  /// document.
+  fragments?: readonly TreeFragment[]
+}
+
+/// This is a commonly used interface for creating an
+/// `IncrementalParse` object.
+export type StartParse = (input: Input, startPos?: number, context?: ParseContext) => IncrementalParse
+
+/// This is the interface the parser uses to access the document. It
+/// exposes a sequence of UTF16 code units. Most (but not _all_)
+/// access, especially through `get`, will be sequential, so
+/// implementations can optimize for that.
+export interface Input {
+  /// The end of the stream.
+  length: number
+  /// Get the code unit at the given position. Will return -1 when
+  /// asked for a point below 0 or beyond the end of the stream.
+  get(pos: number): number
+  /// Returns the string between `pos` and the next newline character
+  /// or the end of the document. Not used by the built-in tokenizers,
+  /// but can be useful in custom tokenizers or completely custom
+  /// parsers.
+  lineAfter(pos: number): string
+  /// Read part of the stream as a string
+  read(from: number, to: number): string
+  /// Return a new `Input` over the same data, but with a lower
+  /// `length`. Used, for example, when nesting grammars to give the
+  /// inner grammar a narrower view of the input.
+  clip(at: number): Input
+}
+
+// Creates an `Input` that is backed by a single, flat string.
+export function stringInput(input: string): Input { return new StringInput(input) }
+
+class StringInput implements Input {
+  constructor(readonly string: string, readonly length = string.length) {}
+
+  get(pos: number) {
+    return pos < 0 || pos >= this.length ? -1 : this.string.charCodeAt(pos)
   }
+
+  lineAfter(pos: number) {
+    if (pos < 0) return ""
+    let end = this.string.indexOf("\n", pos)
+    return this.string.slice(pos, end < 0 ? this.length : Math.min(end, this.length))
+  }
+  
+  read(from: number, to: number): string { return this.string.slice(from, Math.min(this.length, to)) }
+
+  clip(at: number) { return new StringInput(this.string, at) }
 }
