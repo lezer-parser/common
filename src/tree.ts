@@ -1176,9 +1176,9 @@ export class TreeFragment {
   }
 }
 
-/// Interface that a parser that is used as a nested incremental
-/// parser must conform to.
-export interface IncrementalParse {
+/// Interface used to represent an in-progress parse, which can be
+/// moved forward piece-by-piece.
+export interface PartialParse {
   /// Advance the parse state by some amount.
   advance(): Tree | null
   /// The current parse position.
@@ -1188,6 +1188,8 @@ export interface IncrementalParse {
   forceFinish(): Tree
 }
 
+/// A parse context is an object providing additional information to the
+/// parser. It is passed through to nested parsers.
 export interface ParseContext {
   /// A set of fragments from a previous parse to be used for incremental
   /// parsing. These should be aligned with the current document
@@ -1199,10 +1201,6 @@ export interface ParseContext {
   /// document.
   fragments?: readonly TreeFragment[]
 }
-
-/// This is a commonly used interface for creating an
-/// `IncrementalParse` object.
-export type StartParse = (input: Input, startPos?: number, context?: ParseContext) => IncrementalParse
 
 /// This is the interface the parser uses to access the document. It
 /// exposes a sequence of UTF16 code units. Most (but not _all_)
