@@ -1,3 +1,33 @@
+## 0.13.0 (2020-12-04)
+
+### Breaking changes
+
+`NodeType.isRepeated` is now called `isAnonymous`, which more accurately describes what it means.
+
+`NodeGroup` has been renamed to `NodeSet` to avoid confusion with `NodeProp.group`.
+
+The `applyChanges` method on trees is no longer supported (`TreeFragment` is now used to track reusable content).
+
+Trees no longer have `cut` and `append` methods.
+
+### New features
+
+It is now possible to pass a node ID to `SyntaxNode.getChild`/`getChildren` and `NodeType.is`. Allow specifying a tree length in Tree.build
+
+`Tree.build` now allows you to specify the length of the resulting tree.
+
+`Tree.fullCursor()` can now be used to get a cursor that includes anonymous nodes, rather than skipping them.
+
+Introduces `NodeType.define` to define node types.
+
+The new `TreeFragment` type is used to manage reusable subtrees for incremental parsing.
+
+`Tree.build` now accepts a `start` option indicating the start offset of the tree.
+
+The `Input` type, which used to be `InputStream` in the lezer package, is now exported from this package.
+
+This package now exports a `PartialParse` interface, which describes the interface used, for example, as return type from `Parser.startParse`.
+
 ## 0.12.3 (2020-11-02)
 
 ### New features
