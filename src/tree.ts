@@ -450,7 +450,7 @@ export class TreeBuffer {
 
 const enum After { None = -1e8 }
 
-/// A syntax node provides an immutable pointer at a give node in a
+/// A syntax node provides an immutable pointer at a given node in a
 /// tree. When iterating over large amounts of nodes, you may want to
 /// use a mutable [cursor](#tree.TreeCursor) instead, which is more
 /// efficient.
