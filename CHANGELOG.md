@@ -1,3 +1,9 @@
+## 0.13.1 (2021-02-11)
+
+### Bug fixes
+
+Fix a bug where building a tree from a buffer would go wrong for repeat nodes whose children were all repeat nodes of the same type.
+
 ## 0.13.0 (2020-12-04)
 
 ### Breaking changes
