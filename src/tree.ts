@@ -938,8 +938,6 @@ function buildTree(data: BuildData) {
                     children: (Tree | TreeBuffer)[], positions: number[],
                     inRepeat: number) {
     let {id, start, end, size} = cursor
-    while (id == inRepeat) { cursor.next(); ({id, start, end, size} = cursor) }
-
     let startPos = start - parentStart
     if (size < 0) { // Reused node
       children.push(reused[id])
@@ -962,8 +960,10 @@ function buildTree(data: BuildData) {
       cursor.next()
       let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
       let localInRepeat = id >= minRepeatType ? id : -1
-      while (cursor.pos > endPos)
-        takeNode(start, endPos, localChildren, localPositions, localInRepeat)
+      while (cursor.pos > endPos) {
+        if (cursor.id == localInRepeat) cursor.next()
+        else takeNode(start, endPos, localChildren, localPositions, localInRepeat)
+      }
       localChildren.reverse(); localPositions.reverse()
 
       if (localInRepeat > -1 && localChildren.length > BalanceBranchFactor)
