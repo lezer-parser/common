@@ -336,12 +336,20 @@ export class Tree {
   balance(maxBufferLength = DefaultBufferLength) {
     return this.children.length <= BalanceBranchFactor ? this
       : balanceRange(this.type, NodeType.none, this.children, this.positions, 0, this.children.length, 0,
-                     maxBufferLength, this.length)
+                     maxBufferLength, this.length, 0)
   }
 
   /// Build a tree from a postfix-ordered buffer of node information,
   /// or a cursor over such a buffer.
   static build(data: BuildData) { return buildTree(data) }
+}
+
+// For trees that need a context hash attached, we're using this
+// kludge which assigns an extra property directly after
+// initialization (creating a single new object shape).
+function withHash(tree: Tree, hash: number) {
+  if (hash) (tree as any).contextHash = hash
+  return tree
 }
 
 type BuildData = {
@@ -934,14 +942,21 @@ function buildTree(data: BuildData) {
        minRepeatType = nodeSet.types.length} = data as BuildData
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = nodeSet.types
+
+  let contextHash = 0
+
   function takeNode(parentStart: number, minPos: number,
                     children: (Tree | TreeBuffer)[], positions: number[],
                     inRepeat: number) {
     let {id, start, end, size} = cursor
     let startPos = start - parentStart
-    if (size < 0) { // Reused node
-      children.push(reused[id])
-      positions.push(startPos)
+    if (size < 0) {
+      if (size == -1) { // Reused node
+        children.push(reused[id])
+        positions.push(startPos)
+      } else { // Context change
+        contextHash = id
+      }
       cursor.next()
       return
     }
@@ -967,9 +982,10 @@ function buildTree(data: BuildData) {
       localChildren.reverse(); localPositions.reverse()
 
       if (localInRepeat > -1 && localChildren.length > BalanceBranchFactor)
-        node = balanceRange(type, type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength, end - start)
+        node = balanceRange(type, type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength,
+                            end - start, contextHash)
       else
-        node = new Tree(type, localChildren, localPositions, end - start)
+        node = withHash(new Tree(type, localChildren, localPositions, end - start), contextHash)
     }
 
     children.push(node)
@@ -1044,7 +1060,8 @@ function buildTree(data: BuildData) {
 function balanceRange(outerType: NodeType, innerType: NodeType,
                       children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
                       from: number, to: number,
-                      start: number, maxBufferLength: number, length: number): Tree {
+                      start: number, maxBufferLength: number,
+                      length: number, contextHash: number): Tree {
   let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
   if (length <= maxBufferLength) {
     for (let i = from; i < to; i++) {
@@ -1074,15 +1091,15 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
         localChildren.push(children[groupFrom])
       } else {
         let inner = balanceRange(innerType, innerType, children, positions, groupFrom, i, groupStart,
-                                 maxBufferLength, positions[i - 1] + children[i - 1].length - groupStart)
+                                 maxBufferLength, positions[i - 1] + children[i - 1].length - groupStart, contextHash)
         if (innerType != NodeType.none && !containsType(inner.children, innerType))
-          inner = new Tree(NodeType.none, inner.children, inner.positions, inner.length)
+          inner = withHash(new Tree(NodeType.none, inner.children, inner.positions, inner.length), contextHash)
         localChildren.push(inner)
       }
       localPositions.push(groupStart - start)
     }
   }
-  return new Tree(outerType, localChildren, localPositions, length)
+  return withHash(new Tree(outerType, localChildren, localPositions, length), contextHash)
 }
 
 function containsType(nodes: readonly (Tree | TreeBuffer)[], type: NodeType) {
