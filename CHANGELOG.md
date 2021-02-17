@@ -1,3 +1,9 @@
+## 0.13.2 (2021-02-17)
+
+### New features
+
+Add support for context tracking.
+
 ## 0.13.1 (2021-02-11)
 
 ### Bug fixes
