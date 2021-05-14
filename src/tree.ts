@@ -1159,9 +1159,8 @@ export class TreeFragment {
     if (!changes.length) return fragments
     let result: TreeFragment[] = []
     let fI = 1, nextF = fragments.length ? fragments[0] : null
-    let cI = 0, pos = 0, off = 0
-    for (;;) {
-      let nextC = cI < changes.length ? changes[cI++] : null
+    for (let cI = 0, pos = 0, off = 0;; cI++) {
+      let nextC = cI < changes.length ? changes[cI] : null
       let nextPos = nextC ? nextC.fromA : 1e9
       if (nextPos - pos >= minGap) while (nextF && nextF.from < nextPos) {
         let cut: TreeFragment | null = nextF
