@@ -1224,41 +1224,19 @@ export interface ParseContext {
 /// access, especially through `get`, will be sequential, so
 /// implementations can optimize for that.
 export interface Input {
-  /// The end of the stream.
+  /// The length of the document.
   length: number
-  /// Get the code unit at the given position. Will return -1 when
-  /// asked for a point below 0 or beyond the end of the stream.
-  get(pos: number): number
-  /// Returns the string between `pos` and the next newline character
-  /// or the end of the document. Not used by the built-in tokenizers,
-  /// but can be useful in custom tokenizers or completely custom
-  /// parsers.
-  lineAfter(pos: number): string
-  /// Read part of the stream as a string
-  read(from: number, to: number): string
-  /// Return a new `Input` over the same data, but with a lower
-  /// `length`. Used, for example, when nesting grammars to give the
-  /// inner grammar a narrower view of the input.
-  clip(at: number): Input
+  /// Get the chunk after the given position. FIXME
+  chunkAfter(pos: number): {pos: number, text: string} | null
 }
 
 // Creates an `Input` that is backed by a single, flat string.
 export function stringInput(input: string): Input { return new StringInput(input) }
 
 class StringInput implements Input {
-  constructor(readonly string: string, readonly length = string.length) {}
+  constructor(readonly string: string) {}
 
-  get(pos: number) {
-    return pos < 0 || pos >= this.length ? -1 : this.string.charCodeAt(pos)
-  }
+  get length() { return this.string.length }
 
-  lineAfter(pos: number) {
-    if (pos < 0) return ""
-    let end = this.string.indexOf("\n", pos)
-    return this.string.slice(pos, end < 0 ? this.length : Math.min(end, this.length))
-  }
-  
-  read(from: number, to: number): string { return this.string.slice(from, Math.min(this.length, to)) }
-
-  clip(at: number) { return new StringInput(this.string, at) }
+  chunkAfter(pos: number) { return pos >= this.length ? null : {pos: 0, text: this.string} }
 }
