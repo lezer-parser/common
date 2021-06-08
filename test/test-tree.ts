@@ -132,6 +132,18 @@ describe("SyntaxNode", () => {
     ist(anonTree.topNode.firstChild!.name, "a")
     ist(anonTree.topNode.childAfter(1)!.name, "b")
   })
+
+  it("enters mounted trees", () => {
+    let tree = mk("aaa[bbbbbbbbbb]aaa")
+    let node = tree.topNode.childAfter(3)!.tree
+    ist(node instanceof Tree)
+    ;(node as any).props = Object.create(null)
+    ;(node as any).props[(NodeProp.mountedTree as any).id] = mk("((cccccccc))")
+    ist(tree.toString(), "T(a,a,a,T(Pa(Pa(c,c,c,c,c,c,c,c))),a,a,a)")
+    ist(tree.topNode.childAfter(3)!.name, "T")
+    ist(tree.resolve(5, 1).name, "c")
+    ist(tree.topNode.childAfter(3)!.parent!.name, "T")
+  })
 })
 
 describe("TreeCursor", () => {

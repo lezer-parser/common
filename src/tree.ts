@@ -74,6 +74,11 @@ export class NodeProp<T> {
   /// that the node was parsed in, if any. Used to limit reuse of
   /// contextual nodes.
   static contextHash = new NodeProp<number>({perNode: true})
+
+  /// This per-node prop is used to replace a given node by another
+  /// during iteration. This is useful to include trees from nested
+  /// parses in another language's tree.
+  static mountedTree = new NodeProp<Tree>({perNode: true})
 }
 
 /// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
@@ -272,6 +277,8 @@ export class Tree {
 
   /// @internal
   toString(): string {
+    let mounted = this.prop(NodeProp.mountedTree)
+    if (mounted) return mounted.toString()
     let children = this.children.map(c => c.toString()).join()
     return !this.type.name ? children :
       (/\W/.test(this.type.name) && !this.type.isError ? JSON.stringify(this.type.name) : this.type.name) +
@@ -501,6 +508,10 @@ export interface SyntaxNode {
   /// is 1) the given position. Will look in parent nodes if the
   /// position is outside this node.
   resolve(pos: number, side?: -1 | 0 | 1): SyntaxNode
+  /// Get the [tree](#tree.Tree) that represents the current node, if
+  /// any. Will return null when the node is in a [tree
+  /// buffer](#tree.TreeBuffer).
+  tree: Tree | null
 
   /// Get the first child of the given type (which may be a [node
   /// name](#tree.NodeProp.name) or a [group
@@ -537,6 +548,9 @@ class TreeNode implements SyntaxNode {
           let index = next.findChild(0, next.buffer.length, dir, after == After.None ? After.None : after - start)
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
         } else if (full || (!next.type.isAnonymous || hasChild(next))) {
+          let mounted
+          if (next.props && (mounted = next.prop(NodeProp.mountedTree)))
+            return new TreeNode(mounted, start, i, parent)
           let inner = new TreeNode(next, start, i, parent)
           return full || !inner.type.isAnonymous ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
         }
@@ -572,6 +586,8 @@ class TreeNode implements SyntaxNode {
   }
 
   get cursor() { return new TreeCursor(this) }
+
+  get tree() { return this.node }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     return this.cursor.moveTo(pos, side).node
@@ -660,6 +676,8 @@ class BufferNode implements SyntaxNode {
   }
 
   get cursor() { return new TreeCursor(this) }
+
+  get tree() { return null }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     return this.cursor.moveTo(pos, side).node
