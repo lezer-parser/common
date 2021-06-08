@@ -11,39 +11,32 @@ export class NodeProp<T> {
   /// @internal
   id: number
 
+  /// Inidicates whether this prop is stored per [node
+  /// type](#tree.NodeType) or per [tree node](#tree.Tree).
+  perNode: boolean
+
   /// A method that deserializes a value of this prop from a string.
   /// Can be used to allow a prop to be directly written in a grammar
-  /// file. Defaults to raising an error.
+  /// file.
   deserialize: (str: string) => T
 
-  /// Create a new node prop type. You can optionally pass a
-  /// `deserialize` function.
-  constructor({deserialize}: {deserialize?: (str: string) => T} = {}) {
+  /// Create a new node prop type.
+  constructor(config: {
+    /// The [deserialize](#tree.NodeProp.deserialize) function to use
+    /// for this prop. Defaults to a funciton that raises an error.
+    deserialize?: (str: string) => T,
+    /// By default, node props are stored in the [node
+    /// type](#tree.NodeType). It can sometimes be useful to directly
+    /// store information (usually related to the parsing algorithm)
+    /// in [nodes](#tree.Tree) themselves. Set this to true to enable
+    /// that for this prop.
+    perNode?: boolean
+  } = {}) {
     this.id = nextPropID++
-    this.deserialize = deserialize || (() => {
+    this.perNode = !!config.perNode
+    this.deserialize = config.deserialize || (() => {
       throw new Error("This node type doesn't define a deserialize function")
     })
-  }
-
-  /// Create a string-valued node prop whose deserialize function is
-  /// the identity function.
-  static string() { return new NodeProp<string>({deserialize: str => str}) }
-
-  /// Create a number-valued node prop whose deserialize function is
-  /// just `Number`.
-  static number() { return new NodeProp<number>({deserialize: Number}) }
-
-  /// Creates a boolean-valued node prop whose deserialize function
-  /// returns true for any input.
-  static flag() { return new NodeProp<boolean>({deserialize: () => true}) }
-
-  /// Store a value for this prop in the given object. This can be
-  /// useful when building up a prop object to pass to the
-  /// [`NodeType`](#tree.NodeType) constructor. Returns its first
-  /// argument.
-  set(propObj: {[prop: number]: any}, value: T) {
-    propObj[this.id] = value
-    return propObj
   }
 
   /// This is meant to be used with
@@ -76,10 +69,16 @@ export class NodeProp<T> {
   /// types that represent an expression could be tagged with an
   /// `"Expression"` group).
   static group = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
+
+  /// The hash of the [context](#lezer.ContextTracker.constructor)
+  /// that the node was parsed in, if any. Used to limit reuse of
+  /// contextual nodes.
+  static contextHash = new NodeProp<number>({perNode: true})
 }
 
 /// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
-/// the way a prop should be added to each node type in a node set.
+/// whether a prop should be added to a given node type in a node set,
+/// and what value it should have.
 export type NodePropSource = (type: NodeType) => null | [NodeProp<any>, any]
 
 // Note: this is duplicated in lezer/src/constants.ts
@@ -135,7 +134,10 @@ export class NodeType {
     let type = new NodeType(spec.name || "", props, spec.id, flags)
     if (spec.props) for (let src of spec.props) {
       if (!Array.isArray(src)) src = src(type)!
-      if (src) src[0].set(props, src[1])
+      if (src) {
+        if (src[0].perNode) throw new RangeError("Can't store a per-node prop on a node type")
+        props[src[0].id] = src[1]
+      }
     }
     return type
   }
@@ -215,12 +217,12 @@ export class NodeSet {
   extend(...props: NodePropSource[]): NodeSet {
     let newTypes: NodeType[] = []
     for (let type of this.types) {
-      let newProps = null
+      let newProps: null | {[id: number]: any} = null
       for (let source of props) {
         let add = source(type)
         if (add) {
           if (!newProps) newProps = Object.assign({}, type.props)
-          add[0].set(newProps, add[1])
+          newProps[add[0].id] = add[1]
         }
       }
       newTypes.push(newProps ? new NodeType(type.name, newProps, type.id, type.flags) : type)
@@ -243,6 +245,9 @@ export class NodeSet {
 /// some part of this data structure, and can be used to move around
 /// to adjacent nodes.
 export class Tree {
+  /// @internal
+  props: null | {[id: number]: any} = null
+
   /// Construct a new tree. You usually want to go through
   /// [`Tree.build`](#tree.Tree^build) instead.
   constructor(
@@ -255,8 +260,15 @@ export class Tree {
     /// the children.
     readonly positions: readonly number[],
     /// The total length of this tree
-    readonly length: number
-  ) {}
+    readonly length: number,
+    /// Per-node [node props](#tree.NodeProp) to associate with this node.
+    props?: readonly [NodeProp<any> | number, any][]
+  ) {
+    if (props && props.length) {
+      this.props = Object.create(null)
+      for (let [prop, value] of props) this.props![typeof prop == "number" ? prop : prop.id] = value
+    }
+  }
 
   /// @internal
   toString(): string {
@@ -332,6 +344,10 @@ export class Tree {
     }
   }
 
+  prop<T>(prop: NodeProp<T>): T | undefined {
+    return !prop.perNode ? this.type.prop(prop) : this.props ? this.props[prop.id] : undefined
+  }
+
   /// Balance the direct children of this tree.
   balance(maxBufferLength = DefaultBufferLength) {
     return this.children.length <= BalanceBranchFactor ? this
@@ -342,14 +358,6 @@ export class Tree {
   /// Build a tree from a postfix-ordered buffer of node information,
   /// or a cursor over such a buffer.
   static build(data: BuildData) { return buildTree(data) }
-}
-
-// For trees that need a context hash attached, we're using this
-// kludge which assigns an extra property directly after
-// initialization (creating a single new object shape).
-function withHash(tree: Tree, hash: number) {
-  if (hash) (tree as any).contextHash = hash
-  return tree
 }
 
 type BuildData = {
@@ -986,7 +994,7 @@ function buildTree(data: BuildData) {
         node = balanceRange(type, type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength,
                             end - start, contextHash)
       else
-        node = withHash(new Tree(type, localChildren, localPositions, end - start), contextHash)
+        node = makeTree(type, localChildren, localPositions, end - start, contextHash)
     }
 
     children.push(node)
@@ -1094,13 +1102,18 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
         let inner = balanceRange(innerType, innerType, children, positions, groupFrom, i, groupStart,
                                  maxBufferLength, positions[i - 1] + children[i - 1].length - groupStart, contextHash)
         if (innerType != NodeType.none && !containsType(inner.children, innerType))
-          inner = withHash(new Tree(NodeType.none, inner.children, inner.positions, inner.length), contextHash)
+          inner =  makeTree(NodeType.none, inner.children, inner.positions, inner.length, contextHash)
         localChildren.push(inner)
       }
       localPositions.push(groupStart - start)
     }
   }
-  return withHash(new Tree(outerType, localChildren, localPositions, length), contextHash)
+  return makeTree(outerType, localChildren, localPositions, length, contextHash)
+}
+
+function makeTree(type: NodeType, children: readonly (Tree | TreeBuffer)[],
+                  positions: readonly number[], length: number, contextHash: number) {
+  return new Tree(type, children, positions, length, contextHash ? [[NodeProp.contextHash, contextHash]] : undefined)
 }
 
 function containsType(nodes: readonly (Tree | TreeBuffer)[], type: NodeType) {
