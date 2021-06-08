@@ -12,10 +12,11 @@ let nodeSet = new NodeSet(types)
 
 function id(n: string) { return types.find(x => x.name == n)!.id }
 
-function mk(spec: string) {
+function mk(spec: string, conf: {props?: {[pos: number]: [NodeProp<any>, any]}} = {}) {
   let starts: number[] = [], buffer: number[] = []
+  let props = conf.props || {}, propValues: any[] = []
   for (let pos = 0; pos < spec.length;) {
-    let [m, letters, open, close] = /^(?:([abc]+)|([\[\(])|([\]\)]))/.exec(spec.slice(pos))!
+    let [m, letters, open, close] = /^(?:([abc])|([\[\(])|([\]\)]))/.exec(spec.slice(pos))!
     if (letters) {
       let bufStart = buffer.length
       for (let i = 0; i < letters.length; i++) {
@@ -25,11 +26,16 @@ function mk(spec: string) {
     } else if (open) {
       starts.push(buffer.length, pos)
     } else {
-      buffer.push(id(close == ")" ? "Pa" : "Br"), starts.pop()!, pos + 1, (buffer.length + 4) - starts.pop()!)
+      let start = starts.pop()!, startOff = starts.pop()!
+      buffer.push(id(close == ")" ? "Pa" : "Br"), start, pos + 1, (buffer.length + 4) - startOff)
+      if (props[start]) {
+        buffer.push(propValues.length, (props[start][0] as any).id, pos, -2)
+        propValues.push(props[start][1])
+      }
     }
     pos += m.length
   }
-  return Tree.build({buffer, nodeSet, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id})
+  return Tree.build({buffer, nodeSet, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id, propValues})
 }
 
 let _recur: Tree | null = null
@@ -134,13 +140,12 @@ describe("SyntaxNode", () => {
   })
 
   it("enters mounted trees", () => {
-    let tree = mk("aaa[bbbbbbbbbb]aaa")
-    let node = tree.topNode.childAfter(3)!.tree
-    ist(node instanceof Tree)
-    ;(node as any).props = Object.create(null)
-    ;(node as any).props[(NodeProp.mountedTree as any).id] = mk("((cccccccc))")
-    ist(tree.toString(), "T(a,a,a,T(Pa(Pa(c,c,c,c,c,c,c,c))),a,a,a)")
+    let tree = mk("aaa[bbb]aaa", {
+      props: {3: [NodeProp.mountedTree, mk("((c))")]}
+    })
+    ist(tree.toString(), "T(a,a,a,T(Pa(Pa(c))),a,a,a)")
     ist(tree.topNode.childAfter(3)!.name, "T")
+    ist(tree.topNode.childAfter(3)!.firstChild!.from, 3)
     ist(tree.resolve(5, 1).name, "c")
     ist(tree.topNode.childAfter(3)!.parent!.name, "T")
   })

@@ -401,8 +401,11 @@ type BuildData = {
   /// The maximum buffer length to use. Defaults to
   /// [`DefaultBufferLength`](#tree.DefaultBufferLength).
   maxBufferLength?: number,
-  /// An optional set of reused nodes that the buffer can refer to.
-  reused?: (Tree | TreeBuffer)[],
+  /// An optional array holding reused nodes that the buffer can refer
+  /// to.
+  reused?: readonly (Tree | TreeBuffer)[],
+  /// An optional array holding node prop values to use in the buffer.
+  propValues?: readonly any[],
   /// The first node type that indicates repeat constructs in this
   /// grammar.
   minRepeatType?: number
@@ -962,10 +965,16 @@ class FlatBufferCursor implements BufferCursor {
 
 const BalanceBranchFactor = 8
 
+const enum SpecialRecord {
+  Reuse = -1,
+  Prop = -2,
+  ContextChange = -3
+}
+
 function buildTree(data: BuildData) {
   let {buffer, nodeSet, topID = 0,
        maxBufferLength = DefaultBufferLength,
-       reused = [],
+       reused = [], propValues = [],
        minRepeatType = nodeSet.types.length} = data as BuildData
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = nodeSet.types
@@ -975,22 +984,28 @@ function buildTree(data: BuildData) {
   function takeNode(parentStart: number, minPos: number,
                     children: (Tree | TreeBuffer)[], positions: number[],
                     inRepeat: number) {
-    let {id, start, end, size} = cursor
-    let startPos = start - parentStart
-    if (size < 0) {
-      if (size == -1) { // Reused node
-        children.push(reused[id])
-        positions.push(startPos)
-      } else { // Context change
-        contextHash = id
-      }
+    let {id, start, end, size} = cursor, props: undefined | [number, any][]
+    while (size < 0) {
       cursor.next()
-      return
+      if (size == SpecialRecord.Reuse) {
+        children.push(reused[id])
+        positions.push(start - parentStart)
+        return
+      } else if (size == SpecialRecord.ContextChange) { // Context change
+        contextHash = id
+        return
+      } else if (size == SpecialRecord.Prop) {
+        ;(props || (props = [])).push([start, propValues[id]])
+      } else {
+        throw new RangeError(`Unrecognized record size: ${size}`)
+      }
+      ;({id, start, end, size} = cursor)
     }
 
     let type = types[id], node, buffer: {size: number, start: number, skip: number} | undefined
-    if (end - start <= maxBufferLength && (buffer = findBufferSize(cursor.pos - minPos, inRepeat))) {
-      // Small enough for a buffer, and no reused nodes inside
+    let startPos = start - parentStart
+    if (!props && end - start <= maxBufferLength && (buffer = findBufferSize(cursor.pos - minPos, inRepeat))) {
+      // Small enough for a buffer, and no reused nodes or nodes with props inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
@@ -1012,7 +1027,7 @@ function buildTree(data: BuildData) {
         node = balanceRange(type, type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength,
                             end - start, contextHash)
       else
-        node = makeTree(type, localChildren, localPositions, end - start, contextHash)
+        node = makeTree(type, localChildren, localPositions, end - start, contextHash, props)
     }
 
     children.push(node)
@@ -1045,8 +1060,12 @@ function buildTree(data: BuildData) {
       let nodeStart = fork.start
       fork.next()
       while (fork.pos > startPos) {
-        if (fork.size < 0) break scan
-        if (fork.id >= minRepeatType) localSkipped += 4
+        if (fork.size < 0) {
+          if (fork.size == SpecialRecord.ContextChange) localSkipped += 4
+          else break scan
+        } else if (fork.id >= minRepeatType) {
+          localSkipped += 4
+        }
         fork.next()
       }
       start = nodeStart
@@ -1069,7 +1088,9 @@ function buildTree(data: BuildData) {
       while (cursor.pos > endPos)
         index = copyToBuffer(bufferStart, buffer, index, inRepeat)
     }
-    if (id < minRepeatType) { // Don't copy repeat nodes into buffers
+    if (size < 0) {
+      if (size == SpecialRecord.ContextChange) contextHash = id
+    } else if (id < minRepeatType) { // Don't copy repeat nodes into buffers
       buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
@@ -1130,8 +1151,13 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
 }
 
 function makeTree(type: NodeType, children: readonly (Tree | TreeBuffer)[],
-                  positions: readonly number[], length: number, contextHash: number) {
-  return new Tree(type, children, positions, length, contextHash ? [[NodeProp.contextHash, contextHash]] : undefined)
+                  positions: readonly number[], length: number, contextHash: number,
+                  props?: readonly [number | NodeProp<any>, any][]) {
+  if (contextHash) {
+    let pair: [number | NodeProp<any>, any] = [NodeProp.contextHash, contextHash]
+    props = props ? [pair].concat(props) : [pair]
+  }
+  return new Tree(type, children, positions, length, props)
 }
 
 function containsType(nodes: readonly (Tree | TreeBuffer)[], type: NodeType) {
