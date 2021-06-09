@@ -1018,7 +1018,7 @@ function buildTree(data: BuildData) {
       let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
       let localInRepeat = id >= minRepeatType ? id : -1
       while (cursor.pos > endPos) {
-        if (cursor.id == localInRepeat) cursor.next()
+        if (cursor.id == localInRepeat && cursor.size >= 0) cursor.next()
         else takeNode(start, endPos, localChildren, localPositions, localInRepeat)
       }
       localChildren.reverse(); localPositions.reverse()
@@ -1045,8 +1045,9 @@ function buildTree(data: BuildData) {
     let size = 0, start = 0, skip = 0, minStart = fork.end - maxBufferLength
     let result = {size: 0, start: 0, skip: 0}
     scan: for (let minPos = fork.pos - maxSize; fork.pos > minPos;) {
+      let nodeSize = fork.size
       // Pretend nested repeat nodes of the same type don't exist
-      if (fork.id == inRepeat) {
+      if (fork.id == inRepeat && nodeSize >= 0) {
         // Except that we store the current state as a valid return
         // value.
         result.size = size; result.start = start; result.skip = skip
@@ -1054,7 +1055,7 @@ function buildTree(data: BuildData) {
         fork.next()
         continue
       }
-      let nodeSize = fork.size, startPos = fork.pos - nodeSize
+      let startPos = fork.pos - nodeSize
       if (nodeSize < 0 || startPos < minPos || fork.start < minStart) break
       let localSkipped = fork.id >= minRepeatType ? 4 : 0
       let nodeStart = fork.start
