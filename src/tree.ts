@@ -365,7 +365,7 @@ export class Tree {
   /// Balance the direct children of this tree.
   balance(maxBufferLength = DefaultBufferLength) {
     return this.children.length <= BalanceBranchFactor ? this
-      : balanceRange(this.type, NodeType.none, this.children, this.positions, 0, this.children.length, 0,
+      : balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0,
                      maxBufferLength, this.length, 0)
   }
 
@@ -430,10 +430,11 @@ export class TreeBuffer {
     /// The total length of the group of nodes in the buffer.
     readonly length: number,
     /// @internal
-    readonly set: NodeSet,
-    /// An optional repeat node type associated with the buffer.
-    readonly type = NodeType.none
+    readonly set: NodeSet
   ) {}
+
+  /// @internal
+  get type() { return NodeType.none }
 
   /// @internal
   toString() {
@@ -849,7 +850,7 @@ export class TreeCursor {
     for (; parent; {index, _parent: parent} = parent) {
       for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
-        if (this.full || !child.type.isAnonymous || child instanceof TreeBuffer || hasChild(child)) return false
+        if (this.full || child instanceof TreeBuffer || !child.type.isAnonymous || hasChild(child)) return false
       }
     }
     return true
@@ -929,7 +930,7 @@ export class TreeCursor {
 }
 
 function hasChild(tree: Tree): boolean {
-  return tree.children.some(ch => !ch.type.isAnonymous || ch instanceof TreeBuffer || hasChild(ch))
+  return tree.children.some(ch => ch instanceof TreeBuffer || !ch.type.isAnonymous || hasChild(ch))
 }
 
 /// This is used by `Tree.build` as an abstraction for iterating over
@@ -1017,21 +1018,32 @@ function buildTree(data: BuildData) {
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
         index = copyToBuffer(buffer.start, data, index)
-      node = new TreeBuffer(data, end - buffer.start, nodeSet, inRepeat < 0 ? NodeType.none : types[inRepeat])
+      node = new TreeBuffer(data, end - buffer.start, nodeSet)
       startPos = buffer.start - parentStart
     } else { // Make it a node
       let endPos = cursor.pos - size
       cursor.next()
       let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
       let localInRepeat = id >= minRepeatType ? id : -1
+      let lastGroup = 0, lastEnd = end
       while (cursor.pos > endPos) {
-        if (cursor.id == localInRepeat && cursor.size >= 0) cursor.next()
-        else takeNode(start, endPos, localChildren, localPositions, localInRepeat)
+        if (localInRepeat >= 0 && cursor.id == localInRepeat && cursor.size >= 0) {
+          if (cursor.end <= lastEnd - maxBufferLength) {
+            makeRepeatLeaf(localChildren, localPositions, start, lastGroup, cursor.end, lastEnd, localInRepeat)
+            lastGroup = localChildren.length
+            lastEnd = cursor.end
+          }
+          cursor.next()
+        } else {
+          takeNode(start, endPos, localChildren, localPositions, localInRepeat)
+        }
       }
+      if (localInRepeat >= 0 && lastGroup > 0 && lastGroup < localChildren.length)
+        makeRepeatLeaf(localChildren, localPositions, start, lastGroup, start, lastEnd, localInRepeat)
       localChildren.reverse(); localPositions.reverse()
 
-      if (localInRepeat > -1 && localChildren.length > BalanceBranchFactor)
-        node = balanceRange(type, type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength,
+      if (localInRepeat > -1 && lastGroup > 0)
+        node = balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength,
                             end - start, contextHash)
       else
         node = makeTree(type, localChildren, localPositions, end - start, contextHash, props)
@@ -1039,6 +1051,14 @@ function buildTree(data: BuildData) {
 
     children.push(node)
     positions.push(startPos)
+  }
+
+  function makeRepeatLeaf(children: (Tree | TreeBuffer)[], positions: number[], base: number, i: number,
+                          from: number, to: number, type: number) {
+    let localChildren = [], localPositions = []
+    while (children.length > i) { localChildren.push(children.pop()!); localPositions.push(positions.pop()! + base - from) }
+    children.push(new Tree(nodeSet.types[type], localChildren, localPositions, to - from))
+    positions.push(from - base)
   }
 
   function findBufferSize(maxSize: number, inRepeat: number) {
@@ -1112,7 +1132,7 @@ function buildTree(data: BuildData) {
   return new Tree(types[topID], children.reverse(), positions.reverse(), length)
 }
 
-function balanceRange(outerType: NodeType, innerType: NodeType,
+function balanceRange(type: NodeType,
                       children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
                       from: number, to: number,
                       start: number, maxBufferLength: number,
@@ -1134,7 +1154,9 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
       }
       if (i == groupFrom + 1) {
         let only = children[groupFrom]
-        if (only instanceof Tree && only.type == innerType && only.length > maxChild << 1) { // Too big, collapse
+        if (only.length > (maxChild << 1) && only instanceof Tree && only.type == type && only.children.length &&
+            type.isAnonymous && (type == NodeType.none || only.children.every(ch => ch instanceof Tree && ch.type == type))) {
+          // Too big, collapse
           for (let j = 0; j < only.children.length; j++) {
             localChildren.push(only.children[j])
             localPositions.push(only.positions[j] + groupStart - start)
@@ -1145,16 +1167,13 @@ function balanceRange(outerType: NodeType, innerType: NodeType,
       } else if (i == groupFrom + 1) {
         localChildren.push(children[groupFrom])
       } else {
-        let inner = balanceRange(innerType, innerType, children, positions, groupFrom, i, groupStart,
-                                 maxBufferLength, positions[i - 1] + children[i - 1].length - groupStart, contextHash)
-        if (innerType != NodeType.none && !containsType(inner.children, innerType))
-          inner =  makeTree(NodeType.none, inner.children, inner.positions, inner.length, contextHash)
-        localChildren.push(inner)
+        localChildren.push(balanceRange(type.isAnonymous ? type : NodeType.none, children, positions, groupFrom, i, groupStart,
+                                        maxBufferLength, positions[i - 1] + children[i - 1].length - groupStart, contextHash))
       }
       localPositions.push(groupStart - start)
     }
   }
-  return makeTree(outerType, localChildren, localPositions, length, contextHash)
+  return makeTree(type, localChildren, localPositions, length, contextHash)
 }
 
 function makeTree(type: NodeType, children: readonly (Tree | TreeBuffer)[],
@@ -1165,11 +1184,6 @@ function makeTree(type: NodeType, children: readonly (Tree | TreeBuffer)[],
     props = props ? [pair].concat(props) : [pair]
   }
   return new Tree(type, children, positions, length, props)
-}
-
-function containsType(nodes: readonly (Tree | TreeBuffer)[], type: NodeType) {
-  for (let elt of nodes) if (elt.type == type) return true
-  return false
 }
 
 /// The [`TreeFragment.applyChanges`](#tree.TreeFragment^applyChanges)
