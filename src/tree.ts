@@ -1009,7 +1009,7 @@ function buildTree(data: BuildData) {
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
-        index = copyToBuffer(buffer.start, data, index, inRepeat)
+        index = copyToBuffer(buffer.start, data, index)
       node = new TreeBuffer(data, end - buffer.start, nodeSet, inRepeat < 0 ? NodeType.none : types[inRepeat])
       startPos = buffer.start - parentStart
     } else { // Make it a node
@@ -1079,23 +1079,22 @@ function buildTree(data: BuildData) {
     return result.size > 4 ? result : undefined
   }
 
-  function copyToBuffer(bufferStart: number, buffer: Uint16Array, index: number, inRepeat: number): number {
+  function copyToBuffer(bufferStart: number, buffer: Uint16Array, index: number): number {
     let {id, start, end, size} = cursor
     cursor.next()
-    if (id == inRepeat) return index
-    let startIndex = index
-    if (size > 4) {
-      let endPos = cursor.pos - (size - 4)
-      while (cursor.pos > endPos)
-        index = copyToBuffer(bufferStart, buffer, index, inRepeat)
-    }
-    if (size < 0) {
-      if (size == SpecialRecord.ContextChange) contextHash = id
-    } else if (id < minRepeatType) { // Don't copy repeat nodes into buffers
+    if (size >= 0 && id < minRepeatType) {
+      let startIndex = index
+      if (size > 4) {
+        let endPos = cursor.pos - (size - 4)
+        while (cursor.pos > endPos)
+          index = copyToBuffer(bufferStart, buffer, index)
+      }
       buffer[--index] = startIndex
       buffer[--index] = end - bufferStart
       buffer[--index] = start - bufferStart
       buffer[--index] = id
+    } else if (size == SpecialRecord.ContextChange) {
+      contextHash = id
     }
     return index
   }
