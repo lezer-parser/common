@@ -279,7 +279,14 @@ export class Tree {
   toString(): string {
     let mounted = this.prop(NodeProp.mountedTree)
     if (mounted) return mounted.toString()
-    let children = this.children.map(c => c.toString()).join()
+    let children = ""
+    for (let ch of this.children) {
+      let str = ch.toString()
+      if (str) {
+        if (children) children += ","
+        children += str
+      }
+    }
     return !this.type.name ? children :
       (/\W/.test(this.type.name) && !this.type.isError ? JSON.stringify(this.type.name) : this.type.name) +
       (children.length ? "(" + children + ")" : "")
