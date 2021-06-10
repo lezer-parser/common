@@ -1305,7 +1305,8 @@ export interface Input {
   /// The length of the document.
   length: number
   /// Get the chunk after the given position. FIXME
-  chunkAfter(pos: number): {pos: number, text: string} | null
+  chunk(from: number): string
+  read(from: number, to: number): string
 }
 
 // Creates an `Input` that is backed by a single, flat string.
@@ -1316,5 +1317,7 @@ class StringInput implements Input {
 
   get length() { return this.string.length }
 
-  chunkAfter(pos: number) { return pos >= this.length ? null : {pos: 0, text: this.string} }
+  chunk(from: number) { return this.string.slice(from) }
+
+  read(from: number, to: number) { return this.string.slice(from, to) }
 }
