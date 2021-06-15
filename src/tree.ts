@@ -1286,6 +1286,22 @@ export class TreeFragment {
   }
 }
 
+export class InputGap {
+  constructor(
+    readonly from: number,
+    readonly to: number,
+    readonly mount?: Tree
+  ) {}
+
+  static inner(
+    from: number, to: number, outer: readonly InputGap[] | undefined, add?: readonly InputGap[]
+  ): readonly InputGap[] | undefined {
+    if (!outer) return add
+    let rest = outer.filter(g => g.from >= from && g.to <= to)
+    return !rest.length ? add : add ? rest.concat(add).sort((a, b) => a.from - b.from) : rest
+  }
+}
+
 /// Interface used to represent an in-progress parse, which can be
 /// moved forward piece-by-piece.
 export interface PartialParse {
@@ -1296,6 +1312,25 @@ export interface PartialParse {
   /// Get the currently parsed content as a tree, even though the
   /// parse hasn't finished yet.
   forceFinish(): Tree
+}
+
+export interface ParseSpec {
+  from?: number,
+  to?: number,
+  gaps?: readonly InputGap[]
+  context?: ParseContext
+}
+
+export abstract class Parser {
+  abstract startParse(input: Input, spec: ParseSpec): PartialParse
+
+  parse(input: Input | string, spec: ParseSpec = {}) {
+    let parse = this.startParse(typeof input == "string" ? stringInput(input) : input, spec)
+    for (;;) {
+      let done = parse.advance()
+      if (done) return done
+    }
+  }
 }
 
 /// A parse context is an object providing additional information to the
