@@ -413,6 +413,9 @@ type BuildData = {
   topID: number,
   /// The position the tree should start at. Defaults to 0.
   start?: number,
+  /// The position in the buffer where the function should stop
+  /// reading. Defaults to 0.
+  bufferStart?: number,
   /// The length of the wrapping node. The end offset of the last
   /// child is used when not provided.
   length?: number,
@@ -421,7 +424,7 @@ type BuildData = {
   maxBufferLength?: number,
   /// An optional array holding reused nodes that the buffer can refer
   /// to.
-  reused?: readonly (Tree | TreeBuffer)[],
+  reused?: readonly Tree[],
   /// An optional array holding node prop values to use in the buffer.
   propValues?: readonly any[],
   /// The first node type that indicates repeat constructs in this
@@ -991,7 +994,7 @@ const enum SpecialRecord {
 }
 
 function buildTree(data: BuildData) {
-  let {buffer, nodeSet, topID = 0,
+  let {buffer, nodeSet,
        maxBufferLength = DefaultBufferLength,
        reused = [], propValues = [],
        minRepeatType = nodeSet.types.length} = data as BuildData
@@ -1007,7 +1010,8 @@ function buildTree(data: BuildData) {
     while (size < 0) {
       cursor.next()
       if (size == SpecialRecord.Reuse) {
-        children.push(reused[id])
+        let node = reused[id]
+        children.push(props ? new Tree(node.type, node.children, node.positions, node.length, node.propValues.concat(props)) : node)
         positions.push(start - parentStart)
         return
       } else if (size == SpecialRecord.ContextChange) { // Context change
