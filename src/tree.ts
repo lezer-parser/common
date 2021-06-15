@@ -1248,6 +1248,7 @@ const enum Open { Start = 1, End = 2 }
 /// [`applyChanges`](#tree.TreeFragment^applyChanges) method to update
 /// fragments for document changes.
 export class TreeFragment {
+  /// @internal
   constructor(
     /// The start of the unchanged range pointed to by this fragment.
     /// This refers to an offset in the _updated_ document (as opposed
@@ -1262,7 +1263,8 @@ export class TreeFragment {
     /// document to tree positions, subtract it to go from tree to
     /// document positions.
     readonly offset: number,
-    private open: number
+    /// @internal
+    readonly open: number
   ) {}
 
   get openStart() { return (this.open & Open.Start) > 0 }
@@ -1408,4 +1410,80 @@ class StringInput implements Input {
   chunk(from: number) { return this.string.slice(from) }
 
   read(from: number, to: number) { return this.string.slice(from, to) }
+}
+
+export class ScaffoldParser implements Parser {
+  scaffoldProp = new NodeProp<Tree>({perNode: true})
+
+  constructor(
+    readonly scaffold: Parser,
+    readonly fill: Parser,
+    readonly scaffoldNodes: readonly NodeType[]
+  ) {}
+
+  startParse(spec: ParseSpec) {
+    return new ScaffoldParse(this, new FullParseSpec(spec))
+  }
+}
+
+class ScaffoldParse implements PartialParse {
+  outerTree: Tree | null = null
+  outer: PartialParse
+  inner: PartialParse | null = null
+
+  constructor(
+    readonly parser: ScaffoldParser,
+    readonly spec: FullParseSpec
+  ) {
+    // FIXME parse info to use Scaffold through, somehow
+    this.outer = parser.scaffold.startParse({
+      ...spec,
+      fragments: spec.fragments.map(f => new TreeFragment(f.from, f.to, f.tree.prop(parser.scaffoldProp) || f.tree,
+                                                          f.offset, f.open))
+    })
+  }
+
+  get pos() { // FIXME
+    return this.inner ? this.inner.pos : 0
+  }
+
+  advance() {
+    if (this.inner) {
+      let done = this.inner.advance()
+      return done ? this.finishParse(done) : null
+    } else {
+      let done = this.outer.advance()
+      if (done) this.startInner(done)
+      return null
+    }
+  }
+
+  private startInner(outerTree: Tree) {
+    this.outerTree = outerTree
+    let gaps = [], {spec} = this
+    scan: for (let c = outerTree.cursor();;) {
+      if (this.parser.scaffoldNodes.includes(c.type)) {
+        gaps.push(new InputGap(c.from, c.to, c.node.toTree()))
+      } else if (c.firstChild()) {
+        continue
+      }
+      for (;;) {
+        if (c.nextSibling()) break
+        if (!c.parent()) break scan
+      }
+    }
+    this.inner = this.parser.fill.startParse({
+      ...spec,
+      gaps: spec.gaps ? InputGap.inner(spec.from, spec.to, spec.gaps, gaps) : gaps
+    })
+  }
+
+  private finishParse(innerTree: Tree) {
+    return new Tree(innerTree.type, innerTree.children, innerTree.positions, innerTree.length,
+                    innerTree.propValues.concat([[this.parser.scaffoldProp, this.outerTree]]))
+  }
+
+  forceFinish() {
+    return this.inner ? this.finishParse(this.inner.forceFinish()) : this.outer.forceFinish()
+  }
 }
