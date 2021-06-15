@@ -537,6 +537,9 @@ export interface SyntaxNode {
   /// any. Will return null when the node is in a [tree
   /// buffer](#tree.TreeBuffer).
   tree: Tree | null
+  /// Get a [tree](#tree.Tree) for this node. Will allocate one if it
+  /// points into a buffer.
+  toTree(): Tree
 
   /// Get the first child of the given type (which may be a [node
   /// name](#tree.NodeProp.name) or a [group
@@ -613,6 +616,8 @@ class TreeNode implements SyntaxNode {
   get cursor() { return new TreeCursor(this) }
 
   get tree() { return this.node }
+
+  toTree() { return this.node }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     return this.cursor.moveTo(pos, side).node
@@ -703,6 +708,25 @@ class BufferNode implements SyntaxNode {
   get cursor() { return new TreeCursor(this) }
 
   get tree() { return null }
+
+  toTree() {
+    let children = [], positions = []
+    let {buffer} = this.context
+    let startI = this.index + 4, endI = buffer.buffer[this.index + 3]
+    if (endI > startI) {
+      let start = this.from
+      let copy = new Uint16Array(endI - startI)
+      for (let i = startI, j = 0; i < endI;) {
+        copy[j++] = buffer.buffer[i++]
+        copy[j++] = buffer.buffer[i++] - start
+        copy[j++] = buffer.buffer[i++] - start
+        copy[j++] = buffer.buffer[i++] - startI
+      }
+      children.push(new TreeBuffer(copy, buffer.length, buffer.set))
+      positions.push(0)
+    }
+    return new Tree(this.type, children, positions, buffer.length)
+  }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     return this.cursor.moveTo(pos, side).node

@@ -149,6 +149,22 @@ describe("SyntaxNode", () => {
     ist(tree.resolve(5, 1).name, "c")
     ist(tree.topNode.childAfter(3)!.parent!.name, "T")
   })
+
+  it("allows access to the underlying tree", () => {
+    let tree = mk("aaa[bbbbb(bb)bbbbbbb]aaa")
+    let node = tree.topNode.firstChild!
+    while (node.name != "Br") node = node.nextSibling!
+    ist(node.tree instanceof Tree)
+    ist(node.tree.type.name, "Br")
+    node = node.firstChild!
+    while (node.name != "Pa") node = node.nextSibling!
+    ist(!node.tree)
+    ist(node.toTree().toString(), "Pa(b,b)")
+    node = node.firstChild!
+    ist(node.name, "b")
+    ist(node.toTree().toString(), "b")
+    ist(node.toTree().children.length, 0)
+  })
 })
 
 describe("TreeCursor", () => {
