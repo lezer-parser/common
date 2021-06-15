@@ -410,7 +410,7 @@ type BuildData = {
   /// The node types to use.
   nodeSet: NodeSet,
   /// The id of the top node type, if any.
-  topID?: number,
+  topID: number,
   /// The position the tree should start at. Defaults to 0.
   start?: number,
   /// The length of the wrapping node. The end offset of the last
@@ -1138,9 +1138,9 @@ function buildTree(data: BuildData) {
   }
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
-  while (cursor.pos > 0) takeNode(data.start || 0, 0, children, positions, -1)
+  while (cursor.pos > 0) takeNode(data.start || 0, data.bufferStart || 0, children, positions, -1)
   let length = data.length ?? (children.length ? positions[0] + children[0].length : 0)
-  return new Tree(types[topID], children.reverse(), positions.reverse(), length)
+  return new Tree(types[data.topID], children.reverse(), positions.reverse(), length)
 }
 
 function balanceRange(type: NodeType,
