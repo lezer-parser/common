@@ -155,7 +155,7 @@ describe("SyntaxNode", () => {
     let node = tree.topNode.firstChild!
     while (node.name != "Br") node = node.nextSibling!
     ist(node.tree instanceof Tree)
-    ist(node.tree.type.name, "Br")
+    ist(node.tree!.type.name, "Br")
     node = node.firstChild!
     while (node.name != "Pa") node = node.nextSibling!
     ist(!node.tree)

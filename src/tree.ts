@@ -1321,7 +1321,7 @@ export class InputGap {
     from: number, to: number, outer: readonly InputGap[] | undefined, add?: readonly InputGap[]
   ): readonly InputGap[] | undefined {
     if (!outer) return add
-    let rest = outer.filter(g => g.from >= from && g.to <= to)
+    let rest = outer.filter(g => g.from >= from && g.to <= to && (!add || !add.some(e => e.from <= g.from && e.to >= g.to)))
     return !rest.length ? add : add ? rest.concat(add).sort((a, b) => a.from - b.from) : rest
   }
 }
@@ -1338,28 +1338,29 @@ export interface PartialParse {
   forceFinish(): Tree
 }
 
-export interface ParseSpec {
-  from?: number,
-  to?: number,
-  gaps?: readonly InputGap[]
-  context?: ParseContext
-}
+export class FullParseSpec {
+  input: Input
+  from: number
+  to: number
+  fragments: readonly TreeFragment[]
+  gaps: readonly InputGap[] | undefined
+  context: any
 
-export abstract class Parser {
-  abstract startParse(input: Input, spec: ParseSpec): PartialParse
-
-  parse(input: Input | string, spec: ParseSpec = {}) {
-    let parse = this.startParse(typeof input == "string" ? stringInput(input) : input, spec)
-    for (;;) {
-      let done = parse.advance()
-      if (done) return done
-    }
+  constructor(spec: ParseSpec) {
+    this.input = typeof spec.input == "string" ? stringInput(spec.input) : spec.input
+    this.from = spec.from || 0
+    this.to = spec.to ?? this.input.length
+    this.fragments = spec.fragments || []
+    this.gaps = spec.gaps
+    this.context = spec.context
   }
 }
 
-/// A parse context is an object providing additional information to the
-/// parser. It is passed through to nested parsers.
-export interface ParseContext {
+export interface ParseSpec {
+  input: string | Input,
+  from?: number,
+  to?: number,
+  gaps?: readonly InputGap[],
   /// A set of fragments from a previous parse to be used for incremental
   /// parsing. These should be aligned with the current document
   /// (through a call to
@@ -1368,7 +1369,20 @@ export interface ParseContext {
   /// will try to reuse nodes from the fragments in the new parse,
   /// greatly speeding up the parse when it can do so for most of the
   /// document.
-  fragments?: readonly TreeFragment[]
+  fragments?: readonly TreeFragment[],
+  context?: any
+}
+
+export interface Parser {
+  startParse(spec: ParseSpec): PartialParse
+}
+
+export function parse(parser: Parser, spec: ParseSpec) {
+  let parse = parser.startParse(spec)
+  for (;;) {
+    let done = parse.advance()
+    if (done) return done
+  }
 }
 
 /// This is the interface the parser uses to access the document. It
