@@ -358,8 +358,19 @@ export class Tree {
     }
   }
 
+  /// Get the value of the given [node prop](#tree.NodeProp) for this
+  /// node. Works with both per-node and per-type props.
   prop<T>(prop: NodeProp<T>): T | undefined {
     return !prop.perNode ? this.type.prop(prop) : this.props ? this.props[prop.id] : undefined
+  }
+
+  /// Returns the node's [per-node props](#tree.NodeProp.perNode) in a
+  /// format that can be passed to the [`Tree`](#tree.Tree)
+  /// constructor.
+  get propValues(): readonly [NodeProp<any> | number, any][] {
+    let result: [NodeProp<any> | number, any][] = []
+    if (this.props) for (let id in this.props) result.push([+id, this.props[id]])
+    return result
   }
 
   /// Balance the direct children of this tree.
