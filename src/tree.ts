@@ -1308,6 +1308,11 @@ export class TreeFragment {
 
   get openEnd() { return (this.open & Open.End) > 0 }
 
+  /// Create a copy of this fragment holding a different tree.
+  setTree(tree: Tree) {
+    return new TreeFragment(this.from, this.to, tree, this.offset, this.open)
+  }
+
   /// Apply a set of edits to an array of fragments, removing or
   /// splitting fragments as necessary to remove edited ranges, and
   /// adjusting offsets for fragments that moved.
@@ -1485,9 +1490,7 @@ class ScaffoldParse implements PartialParse {
   ) {
     this.outer = parser.scaffold.startParse({
       ...spec,
-      // FIXME needs a proper public way to update a TreeFragment
-      fragments: spec.fragments.map(f => new TreeFragment(f.from, f.to, f.tree.prop(parser.scaffoldProp) || f.tree,
-                                                          f.offset, f.open))
+      fragments: spec.fragments.map(f => f.setTree(f.tree.prop(parser.scaffoldProp) || f.tree))
     })
   }
 
