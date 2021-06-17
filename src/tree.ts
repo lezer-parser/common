@@ -75,6 +75,12 @@ export class NodeProp<T> {
   /// contextual nodes.
   static contextHash = new NodeProp<number>({perNode: true})
 
+  /// The distance beyond the end of the node that the tokenizer
+  /// looked ahead for any of the tokens inside the node. (The LR
+  /// parser only stores this when it is larger than 25, for
+  /// efficiency reasons).
+  static lookAhead = new NodeProp<number>({perNode: true})
+
   /// This per-node prop is used to replace a given node by another
   /// during iteration. This is useful to include trees from nested
   /// parses in another language's tree.
@@ -1014,7 +1020,8 @@ const BalanceBranchFactor = 8
 const enum SpecialRecord {
   Reuse = -1,
   Prop = -2,
-  ContextChange = -3
+  ContextChange = -3,
+  LookAhead = -4
 }
 
 function buildTree(data: BuildData) {
@@ -1025,12 +1032,13 @@ function buildTree(data: BuildData) {
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = nodeSet.types
 
-  let contextHash = 0
+  let contextHash = 0, lookAhead = 0
 
   function takeNode(parentStart: number, minPos: number,
                     children: (Tree | TreeBuffer)[], positions: number[],
                     inRepeat: number) {
     let {id, start, end, size} = cursor, props: undefined | [number, any][]
+    let lookAheadAtStart = lookAhead
     while (size < 0) {
       cursor.next()
       if (size == SpecialRecord.Reuse) {
@@ -1043,6 +1051,9 @@ function buildTree(data: BuildData) {
         return
       } else if (size == SpecialRecord.Prop) {
         ;(props || (props = [])).push([start, propValues[id]])
+      } else if (size == SpecialRecord.LookAhead) {
+        lookAhead = id
+        return
       } else {
         throw new RangeError(`Unrecognized record size: ${size}`)
       }
@@ -1068,7 +1079,7 @@ function buildTree(data: BuildData) {
       while (cursor.pos > endPos) {
         if (localInRepeat >= 0 && cursor.id == localInRepeat && cursor.size >= 0) {
           if (cursor.end <= lastEnd - maxBufferLength) {
-            makeRepeatLeaf(localChildren, localPositions, start, lastGroup, cursor.end, lastEnd, localInRepeat)
+            makeRepeatLeaf(localChildren, localPositions, start, lastGroup, cursor.end, lastEnd, localInRepeat, lookAheadAtStart)
             lastGroup = localChildren.length
             lastEnd = cursor.end
           }
@@ -1078,14 +1089,14 @@ function buildTree(data: BuildData) {
         }
       }
       if (localInRepeat >= 0 && lastGroup > 0 && lastGroup < localChildren.length)
-        makeRepeatLeaf(localChildren, localPositions, start, lastGroup, start, lastEnd, localInRepeat)
+        makeRepeatLeaf(localChildren, localPositions, start, lastGroup, start, lastEnd, localInRepeat, lookAheadAtStart)
       localChildren.reverse(); localPositions.reverse()
 
       if (localInRepeat > -1 && lastGroup > 0)
         node = balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength,
                             end - start, contextHash)
       else
-        node = makeTree(type, localChildren, localPositions, end - start, contextHash, props)
+        node = makeTree(type, localChildren, localPositions, end - start, contextHash, lookAheadAtStart - end, props)
     }
 
     children.push(node)
@@ -1093,10 +1104,10 @@ function buildTree(data: BuildData) {
   }
 
   function makeRepeatLeaf(children: (Tree | TreeBuffer)[], positions: number[], base: number, i: number,
-                          from: number, to: number, type: number) {
+                          from: number, to: number, type: number, lookAhead: number) {
     let localChildren = [], localPositions = []
     while (children.length > i) { localChildren.push(children.pop()!); localPositions.push(positions.pop()! + base - from) }
-    children.push(new Tree(nodeSet.types[type], localChildren, localPositions, to - from))
+    children.push(makeTree(nodeSet.types[type], localChildren, localPositions, to - from, contextHash, lookAhead - to))
     positions.push(from - base)
   }
 
@@ -1161,6 +1172,8 @@ function buildTree(data: BuildData) {
       buffer[--index] = id
     } else if (size == SpecialRecord.ContextChange) {
       contextHash = id
+    } else if (size == SpecialRecord.LookAhead) {
+      lookAhead = id
     }
     return index
   }
@@ -1171,11 +1184,24 @@ function buildTree(data: BuildData) {
   return new Tree(types[data.topID], children.reverse(), positions.reverse(), length)
 }
 
-function balanceRange(type: NodeType,
-                      children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
-                      from: number, to: number,
-                      start: number, maxBufferLength: number,
-                      length: number, contextHash: number): Tree {
+function balanceRange(
+  // The type to tag the resulting tree with. Will also be used for
+  // internal nodes when it is an anonymous type
+  type: NodeType,
+  // The direct children and their positions
+  children: readonly (Tree | TreeBuffer)[],
+  positions: readonly number[],
+  // The index range in children/positions to use
+  from: number, to: number,
+  // The start position of the nodes, relative to their parent.
+  start: number,
+  // Max buffer length. Used to determine the proper size of nodes.
+  maxBufferLength: number,
+  // Length of the outer node
+  length: number,
+  // A context hash to attach to the created nodes
+  contextHash: number
+): Tree {
   let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
   if (length <= maxBufferLength) {
     for (let i = from; i < to; i++) {
@@ -1212,14 +1238,25 @@ function balanceRange(type: NodeType,
       localPositions.push(groupStart - start)
     }
   }
-  return makeTree(type, localChildren, localPositions, length, contextHash)
+  let lookAhead = 0, lastI = localChildren.length - 1, last, lookAheadProp
+  if (lastI >= 0 && (last = localChildren[lastI]) instanceof Tree) {
+    if (!lastI && last.type == type && last.length == length) return last
+    if (lookAheadProp = last.prop(NodeProp.lookAhead))
+      lookAhead = localPositions[lastI] + last.length + lookAheadProp
+  }
+  return makeTree(type, localChildren, localPositions, length, contextHash, lookAhead)
 }
 
 function makeTree(type: NodeType, children: readonly (Tree | TreeBuffer)[],
-                  positions: readonly number[], length: number, contextHash: number,
+                  positions: readonly number[], length: number,
+                  contextHash: number, lookAhead: number = 0,
                   props?: readonly [number | NodeProp<any>, any][]) {
   if (contextHash) {
     let pair: [number | NodeProp<any>, any] = [NodeProp.contextHash, contextHash]
+    props = props ? [pair].concat(props) : [pair]
+  }
+  if (lookAhead > 25) {
+    let pair: [number | NodeProp<any>, any] = [NodeProp.lookAhead, lookAhead]
     props = props ? [pair].concat(props) : [pair]
   }
   return new Tree(type, children, positions, length, props)
