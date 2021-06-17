@@ -1450,13 +1450,24 @@ class StringInput implements Input {
 }
 
 export class ScaffoldParser implements Parser {
-  scaffoldProp = new NodeProp<Tree>({perNode: true})
+  /// @internal
+  readonly scaffoldProp = new NodeProp<Tree>({perNode: true})
+  /// @internal
+  readonly scaffold: Parser
+  /// @internal
+  readonly fill: Parser
+  /// @internal
+  readonly scaffoldNodes: readonly NodeType[]
 
-  constructor(
-    readonly scaffold: Parser,
-    readonly fill: Parser,
-    readonly scaffoldNodes: readonly NodeType[]
-  ) {}
+  constructor(config: {
+    scaffold: Parser,
+    fill: Parser,
+    scaffoldNodes: readonly NodeType[]
+  }) {
+    this.scaffold = config.scaffold
+    this.fill = config.fill
+    this.scaffoldNodes = config.scaffoldNodes
+  }
 
   startParse(spec: ParseSpec) {
     return new ScaffoldParse(this, new FullParseSpec(spec))
@@ -1472,9 +1483,9 @@ class ScaffoldParse implements PartialParse {
     readonly parser: ScaffoldParser,
     readonly spec: FullParseSpec
   ) {
-    // FIXME parse info to use Scaffold through, somehow
     this.outer = parser.scaffold.startParse({
       ...spec,
+      // FIXME needs a proper public way to update a TreeFragment
       fragments: spec.fragments.map(f => new TreeFragment(f.from, f.to, f.tree.prop(parser.scaffoldProp) || f.tree,
                                                           f.offset, f.open))
     })
