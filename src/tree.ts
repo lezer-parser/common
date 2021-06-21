@@ -1429,15 +1429,21 @@ export function parse(parser: Parser, spec: ParseSpec) {
   }
 }
 
-/// This is the interface the parser uses to access the document. It
-/// exposes a sequence of UTF16 code units. Most (but not _all_)
-/// access, especially through `get`, will be sequential, so
-/// implementations can optimize for that.
+/// This is the interface parsers use to access the document. To run
+/// Lezer directly on your own document data structure, you have to
+/// write an implementation of it.
 export interface Input {
   /// The length of the document.
   length: number
   /// Get the chunk after the given position. FIXME
   chunk(from: number): string
+  /// Indicates whether the chunks already end at line breaks, so that
+  /// client code that wants to work by-line can avoid re-scanning
+  /// them for line breaks. When this is true, the result of `chunk()`
+  /// should either be a single line break, or the content between
+  /// `from` and the next line break.
+  lineChunks: boolean
+  /// Read the part of the document between the given positions.
   read(from: number, to: number): string
 }
 
@@ -1450,6 +1456,8 @@ class StringInput implements Input {
   get length() { return this.string.length }
 
   chunk(from: number) { return this.string.slice(from) }
+
+  get lineChunks() { return false }
 
   read(from: number, to: number) { return this.string.slice(from, to) }
 }
