@@ -1401,10 +1401,10 @@ export class FullParseSpec {
 }
 
 export interface ParseSpec {
-  input: string | Input,
-  from?: number,
-  to?: number,
-  gaps?: readonly InputGap[],
+  input: string | Input
+  from?: number
+  to?: number
+  gaps?: readonly InputGap[]
   /// A set of fragments from a previous parse to be used for incremental
   /// parsing. These should be aligned with the current document
   /// (through a call to
@@ -1413,20 +1413,14 @@ export interface ParseSpec {
   /// will try to reuse nodes from the fragments in the new parse,
   /// greatly speeding up the parse when it can do so for most of the
   /// document.
-  fragments?: readonly TreeFragment[],
+  fragments?: readonly TreeFragment[]
   context?: any
 }
 
-export interface Parser {
+/// The base interface that parsers should conform to. Mostly used
+/// around nestable parsers.
+export interface AbstractParser {
   startParse(spec: ParseSpec): PartialParse
-}
-
-export function parse(parser: Parser, spec: ParseSpec) {
-  let parse = parser.startParse(spec)
-  for (;;) {
-    let done = parse.advance()
-    if (done) return done
-  }
 }
 
 /// This is the interface parsers use to access the document. To run
@@ -1462,19 +1456,19 @@ class StringInput implements Input {
   read(from: number, to: number) { return this.string.slice(from, to) }
 }
 
-export class ScaffoldParser implements Parser {
+export class ScaffoldParser implements AbstractParser {
   /// @internal
   readonly scaffoldProp = new NodeProp<Tree>({perNode: true})
   /// @internal
-  readonly scaffold: Parser
+  readonly scaffold: AbstractParser
   /// @internal
-  readonly fill: Parser
+  readonly fill: AbstractParser
   /// @internal
   readonly scaffoldNodes: readonly NodeType[]
 
   constructor(config: {
-    scaffold: Parser,
-    fill: Parser,
+    scaffold: AbstractParser,
+    fill: AbstractParser,
     scaffoldNodes: readonly NodeType[]
   }) {
     this.scaffold = config.scaffold
