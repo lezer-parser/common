@@ -1419,8 +1419,18 @@ export interface ParseSpec {
 
 /// The base interface that parsers should conform to. Mostly used
 /// around nestable parsers.
-export interface AbstractParser {
-  startParse(spec: ParseSpec): PartialParse
+export abstract class AbstractParser {
+  /// Start a parse.
+  abstract startParse(spec: ParseSpec): PartialParse
+
+  /// Run a full parse, returning the resulting tree.
+  parse(spec: ParseSpec) {
+    let parse = this.startParse(spec)
+    for (;;) {
+      let done = parse.advance()
+      if (done) return done
+    }
+  }
 }
 
 /// This is the interface parsers use to access the document. To run
@@ -1456,7 +1466,7 @@ class StringInput implements Input {
   read(from: number, to: number) { return this.string.slice(from, to) }
 }
 
-export class ScaffoldParser implements AbstractParser {
+export class ScaffoldParser extends AbstractParser {
   /// @internal
   readonly scaffoldProp = new NodeProp<Tree>({perNode: true})
   /// @internal
@@ -1471,6 +1481,7 @@ export class ScaffoldParser implements AbstractParser {
     fill: AbstractParser,
     scaffoldNodes: readonly NodeType[]
   }) {
+    super()
     this.scaffold = config.scaffold
     this.fill = config.fill
     this.scaffoldNodes = config.scaffoldNodes
