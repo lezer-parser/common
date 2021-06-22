@@ -380,10 +380,13 @@ export class Tree {
   }
 
   /// Balance the direct children of this tree.
-  balance(maxBufferLength = DefaultBufferLength) {
-    return this.children.length <= BalanceBranchFactor ? this
-      : balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0,
-                     maxBufferLength, this.length, 0)
+  balance(config: {
+    makeTree?: (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => Tree
+  } = {}) {
+    return this.children.length <= BalanceBranchFactor ? this :
+      balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0, this.length,
+                   (children, positions, length) => new Tree(this.type, children, positions, length, this.propValues),
+                   config.makeTree || ((children, positions, length) => new Tree(NodeType.none, children, positions, length)))
   }
 
   /// Build a tree from a postfix-ordered buffer of node information,
@@ -1092,23 +1095,52 @@ function buildTree(data: BuildData) {
         makeRepeatLeaf(localChildren, localPositions, start, lastGroup, start, lastEnd, localInRepeat, lookAheadAtStart)
       localChildren.reverse(); localPositions.reverse()
 
-      if (localInRepeat > -1 && lastGroup > 0)
-        node = balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, maxBufferLength,
-                            end - start, contextHash)
-      else
-        node = makeTree(type, localChildren, localPositions, end - start, contextHash, lookAheadAtStart - end, props)
+      if (localInRepeat > -1 && lastGroup > 0) {
+        let make = makeBalanced(type)
+        node = balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, end - start, make, make)
+      } else {
+        node = makeTree(type, localChildren, localPositions, end - start, lookAheadAtStart - end, props)
+      }
     }
 
     children.push(node)
     positions.push(startPos)
   }
 
+  function makeBalanced(type: NodeType) {
+    return (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => {
+      let lookAhead = 0, lastI = children.length - 1, last, lookAheadProp
+      if (lastI >= 0 && (last = children[lastI]) instanceof Tree) {
+        if (!lastI && last.type == type && last.length == length) return last
+        if (lookAheadProp = last.prop(NodeProp.lookAhead))
+          lookAhead = positions[lastI] + last.length + lookAheadProp
+      }
+      return makeTree(type, children, positions, length, lookAhead)
+    }
+  }
+
   function makeRepeatLeaf(children: (Tree | TreeBuffer)[], positions: number[], base: number, i: number,
                           from: number, to: number, type: number, lookAhead: number) {
     let localChildren = [], localPositions = []
     while (children.length > i) { localChildren.push(children.pop()!); localPositions.push(positions.pop()! + base - from) }
-    children.push(makeTree(nodeSet.types[type], localChildren, localPositions, to - from, contextHash, lookAhead - to))
+    children.push(makeTree(nodeSet.types[type], localChildren, localPositions, to - from, lookAhead - to))
     positions.push(from - base)
+  }
+
+  function makeTree(type: NodeType,
+                    children: readonly (Tree | TreeBuffer)[],
+                    positions: readonly number[], length: number,
+                    lookAhead: number = 0,
+                    props?: readonly [number | NodeProp<any>, any][]) {
+    if (contextHash) {
+      let pair: [number | NodeProp<any>, any] = [NodeProp.contextHash, contextHash]
+      props = props ? [pair].concat(props) : [pair]
+    }
+    if (lookAhead > 25) {
+      let pair: [number | NodeProp<any>, any] = [NodeProp.lookAhead, lookAhead]
+      props = props ? [pair].concat(props) : [pair]
+    }
+    return new Tree(type, children, positions, length, props)
   }
 
   function findBufferSize(maxSize: number, inRepeat: number) {
@@ -1195,25 +1227,25 @@ function balanceRange(
   from: number, to: number,
   // The start position of the nodes, relative to their parent.
   start: number,
-  // Max buffer length. Used to determine the proper size of nodes.
-  maxBufferLength: number,
   // Length of the outer node
   length: number,
-  // A context hash to attach to the created nodes
-  contextHash: number
+  // Function to build the top node of the balanced tree
+  mkTop: ((children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => Tree) | null,
+  // Function to build internal nodes for the balanced tree
+  mkTree: (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => Tree
 ): Tree {
   let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
-  if (length <= maxBufferLength) {
+  if (to - from <= BalanceBranchFactor) {
     for (let i = from; i < to; i++) {
       localChildren.push(children[i])
       localPositions.push(positions[i] - start)
     }
   } else {
-    let maxChild = Math.max(maxBufferLength, Math.ceil(length * 1.5 / BalanceBranchFactor))
+    let maxChild = Math.max(DefaultBufferLength, Math.ceil(length * 1.5 / BalanceBranchFactor))
     for (let i = from; i < to;) {
       let groupFrom = i, groupStart = positions[i]
       i++
-      for (; i < to; i++) {
+      for (let e = Math.min(to, i + BalanceBranchFactor - 1); i < e; i++) {
         let nextEnd = positions[i] + children[i].length
         if (nextEnd - groupStart > maxChild) break
       }
@@ -1232,34 +1264,16 @@ function balanceRange(
       } else if (i == groupFrom + 1) {
         localChildren.push(children[groupFrom])
       } else {
-        localChildren.push(balanceRange(type.isAnonymous ? type : NodeType.none, children, positions, groupFrom, i, groupStart,
-                                        maxBufferLength, positions[i - 1] + children[i - 1].length - groupStart, contextHash))
+        if (groupFrom == from && i == to) throw new Error("NO PROGRESS " + groupFrom + " " + i)
+        localChildren.push(balanceRange(type, children, positions, groupFrom, i, groupStart,
+                                        positions[i - 1] + children[i - 1].length - groupStart, null, mkTree))
       }
       localPositions.push(groupStart - start)
     }
   }
-  let lookAhead = 0, lastI = localChildren.length - 1, last, lookAheadProp
-  if (lastI >= 0 && (last = localChildren[lastI]) instanceof Tree) {
-    if (!lastI && last.type == type && last.length == length) return last
-    if (lookAheadProp = last.prop(NodeProp.lookAhead))
-      lookAhead = localPositions[lastI] + last.length + lookAheadProp
-  }
-  return makeTree(type, localChildren, localPositions, length, contextHash, lookAhead)
-}
-
-function makeTree(type: NodeType, children: readonly (Tree | TreeBuffer)[],
-                  positions: readonly number[], length: number,
-                  contextHash: number, lookAhead: number = 0,
-                  props?: readonly [number | NodeProp<any>, any][]) {
-  if (contextHash) {
-    let pair: [number | NodeProp<any>, any] = [NodeProp.contextHash, contextHash]
-    props = props ? [pair].concat(props) : [pair]
-  }
-  if (lookAhead > 25) {
-    let pair: [number | NodeProp<any>, any] = [NodeProp.lookAhead, lookAhead]
-    props = props ? [pair].concat(props) : [pair]
-  }
-  return new Tree(type, children, positions, length, props)
+  if (localChildren.length > BalanceBranchFactor)
+    return balanceRange(type, localChildren, localPositions, 0, localChildren.length, start, length, mkTop, mkTree)
+  return (mkTop || mkTree)(localChildren, localPositions, length)
 }
 
 /// The [`TreeFragment.applyChanges`](#tree.TreeFragment^applyChanges)
