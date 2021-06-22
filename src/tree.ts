@@ -731,7 +731,7 @@ class BufferNode implements SyntaxNode {
       children.push(new TreeBuffer(copy, buffer.length, buffer.set))
       positions.push(0)
     }
-    return new Tree(this.type, children, positions, buffer.length)
+    return new Tree(this.type, children, positions, this.to - this.from)
   }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
@@ -1395,7 +1395,7 @@ export class FullParseSpec {
     this.from = spec.from || 0
     this.to = spec.to ?? this.input.length
     this.fragments = spec.fragments || []
-    this.gaps = spec.gaps
+    this.gaps = spec.gaps && spec.gaps.length ? spec.gaps : undefined
     this.context = spec.context
   }
 }
