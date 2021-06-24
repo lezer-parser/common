@@ -1387,13 +1387,22 @@ export class InputGap {
 /// Interface used to represent an in-progress parse, which can be
 /// moved forward piece-by-piece.
 export interface PartialParse {
-  /// Advance the parse state by some amount.
+  /// Advance the parse state by some amount. Will return the finished
+  /// syntax tree when the parse completes.
   advance(): Tree | null
-  /// The current parse position.
-  pos: number
-  /// Get the currently parsed content as a tree, even though the
-  /// parse hasn't finished yet.
-  forceFinish(): Tree
+  /// The position up to which the document has been parsed. Note
+  /// that, in multi-pass parsers, this will stay back until the last
+  /// pass has moved past a given position.
+  readonly parsedPos: number
+  /// Tell the parse to not advance beyond the given position.
+  /// `advance` will return a tree when the parse has reached the
+  /// position. Note that, depending on the parser algorithm and the
+  /// state of the parse when `stopAt` was called, that tree may
+  /// contain nodes beyond the position. It is not allowed to call
+  /// `stopAt` a second time with a higher position.
+  stopAt(pos: number): void
+  /// Reports whether `stopAt` has been called on this parse.
+  readonly stoppedAt: number | null
 }
 
 export class FullParseSpec {
@@ -1510,6 +1519,7 @@ class ScaffoldParse implements PartialParse {
   outerTree: Tree | null = null
   outer: PartialParse
   inner: PartialParse | null = null
+  stoppedAt: null | number = null
 
   constructor(
     readonly parser: ScaffoldParser,
@@ -1521,8 +1531,8 @@ class ScaffoldParse implements PartialParse {
     })
   }
 
-  get pos() { // FIXME
-    return this.inner ? this.inner.pos : 0
+  get parsedPos() {
+    return this.inner ? this.inner.parsedPos : 0
   }
 
   advance() {
@@ -1534,6 +1544,11 @@ class ScaffoldParse implements PartialParse {
       if (done) this.startInner(done)
       return null
     }
+  }
+
+  stopAt(pos: number) {
+    this.outer.stopAt(pos)
+    if (this.inner) this.inner.stopAt(pos)
   }
 
   private startInner(outerTree: Tree) {
@@ -1554,14 +1569,11 @@ class ScaffoldParse implements PartialParse {
       ...spec,
       gaps: spec.gaps ? InputGap.inner(spec.from, spec.to, spec.gaps, gaps) : gaps
     })
+    if (this.stoppedAt != null) this.inner.stopAt(this.stoppedAt)
   }
 
   private finishParse(innerTree: Tree) {
     return new Tree(innerTree.type, innerTree.children, innerTree.positions, innerTree.length,
                     innerTree.propValues.concat([[this.parser.scaffoldProp, this.outerTree]]))
-  }
-
-  forceFinish() {
-    return this.inner ? this.finishParse(this.inner.forceFinish()) : this.outer.forceFinish()
   }
 }
