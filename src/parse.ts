@@ -135,7 +135,6 @@ export class FullParseSpec {
   to: number
   fragments: readonly TreeFragment[]
   gaps: readonly InputGap[] | undefined
-  context: any
 
   constructor(spec: ParseSpec) {
     this.input = typeof spec.input == "string" ? new StringInput(spec.input) : spec.input
@@ -143,7 +142,6 @@ export class FullParseSpec {
     this.to = spec.to ?? this.input.length
     this.fragments = spec.fragments || []
     this.gaps = spec.gaps && spec.gaps.length ? spec.gaps : undefined
-    this.context = spec.context
   }
 }
 
@@ -161,7 +159,6 @@ export interface ParseSpec {
   /// greatly speeding up the parse when it can do so for most of the
   /// document.
   fragments?: readonly TreeFragment[]
-  context?: any
 }
 
 /// The base interface that parsers should conform to. Mostly used
