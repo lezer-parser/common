@@ -383,7 +383,7 @@ export class Tree {
   balance(config: {
     makeTree?: (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => Tree
   } = {}) {
-    return this.children.length <= BalanceBranchFactor ? this :
+    return this.children.length <= Balance.BranchFactor ? this :
       balanceRange(this.type, this.children, this.positions, 0, this.children.length, 0, this.length,
                    (children, positions, length) => new Tree(this.type, children, positions, length, this.propValues),
                    config.makeTree || ((children, positions, length) => new Tree(NodeType.none, children, positions, length)))
@@ -1018,7 +1018,7 @@ class FlatBufferCursor implements BufferCursor {
   fork() { return new FlatBufferCursor(this.buffer, this.index) }
 }
 
-const BalanceBranchFactor = 8
+const enum Balance { BranchFactor = 8 }
 
 const enum SpecialRecord {
   Reuse = -1,
@@ -1216,6 +1216,17 @@ function buildTree(data: BuildData) {
   return new Tree(types[data.topID], children.reverse(), positions.reverse(), length)
 }
 
+const nodeSizeCache: WeakMap<Tree, number> = new WeakMap
+function nodeSize(balanceType: NodeType, node: Tree | TreeBuffer): number {
+  if (!balanceType.isAnonymous || node instanceof TreeBuffer || node.type != balanceType) return 1
+  let size = nodeSizeCache.get(node)
+  if (size == null) {
+    size = node.children.reduce((s, ch) => s + nodeSize(balanceType, ch), 1)
+    nodeSizeCache.set(node, size)
+  }
+  return size
+}
+
 function balanceRange(
   // The type to tag the resulting tree with. Will also be used for
   // internal nodes when it is an anonymous type
@@ -1234,45 +1245,36 @@ function balanceRange(
   // Function to build internal nodes for the balanced tree
   mkTree: (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => Tree
 ): Tree {
+  let total = 0
+  for (let i = from; i < to; i++) total += nodeSize(type, children[i])
+
+  let maxChild = Math.ceil((total * 1.5) / Balance.BranchFactor)
   let localChildren: (Tree | TreeBuffer)[] = [], localPositions: number[] = []
-  if (to - from <= BalanceBranchFactor) {
-    for (let i = from; i < to; i++) {
-      localChildren.push(children[i])
-      localPositions.push(positions[i] - start)
-    }
-  } else {
-    let maxChild = Math.max(DefaultBufferLength, Math.ceil(length * 1.5 / BalanceBranchFactor))
+  function divide(children: readonly (Tree | TreeBuffer)[], positions: readonly number[],
+                  from: number, to: number, offset: number) {
     for (let i = from; i < to;) {
-      let groupFrom = i, groupStart = positions[i]
+      let groupFrom = i, groupStart = positions[i], groupSize = nodeSize(type, children[i])
       i++
-      for (let e = Math.min(to, i + BalanceBranchFactor - 1); i < e; i++) {
-        let nextEnd = positions[i] + children[i].length
-        if (nextEnd - groupStart > maxChild) break
+      for (; i < to; i++) {
+        let nextSize = nodeSize(type, children[i])
+        if (groupSize + nextSize >= maxChild) break
+        groupSize += nextSize
       }
       if (i == groupFrom + 1) {
-        let only = children[groupFrom]
-        if (only.length > (maxChild << 1) && only instanceof Tree && only.type == type && only.children.length &&
-            type.isAnonymous && (type == NodeType.none || only.children.every(ch => ch instanceof Tree && ch.type == type))) {
-          // Too big, collapse
-          for (let j = 0; j < only.children.length; j++) {
-            localChildren.push(only.children[j])
-            localPositions.push(only.positions[j] + groupStart - start)
-          }
+        if (groupSize > maxChild) {
+          let only = children[groupFrom] as Tree
+          divide(only.children, only.positions, 0, only.children.length, positions[groupFrom] + offset)
           continue
         }
-        localChildren.push(only)
-      } else if (i == groupFrom + 1) {
         localChildren.push(children[groupFrom])
       } else {
-        if (groupFrom == from && i == to) throw new Error("NO PROGRESS " + groupFrom + " " + i)
-        localChildren.push(balanceRange(type, children, positions, groupFrom, i, groupStart,
-                                        positions[i - 1] + children[i - 1].length - groupStart, null, mkTree))
+        let length = positions[i - 1] + children[i - 1].length - groupStart
+        localChildren.push(balanceRange(type, children, positions, groupFrom, i, groupStart, length, null, mkTree))
       }
-      localPositions.push(groupStart - start)
+      localPositions.push(groupStart + offset - start)
     }
   }
-  if (localChildren.length > BalanceBranchFactor)
-    return balanceRange(type, localChildren, localPositions, 0, localChildren.length, start, length, mkTop, mkTree)
+  divide(children, positions, from, to, 0)
   return (mkTop || mkTree)(localChildren, localPositions, length)
 }
 
