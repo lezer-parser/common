@@ -1,4 +1,4 @@
-import {Tree, NodeSet, NodeType, SyntaxNode, NodeProp} from ".."
+import {Tree, NodeSet, NodeType, SyntaxNode, NodeProp} from "../dist/index.js"
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => NodeType.define({

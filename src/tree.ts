@@ -1414,7 +1414,7 @@ export class FullParseSpec {
   context: any
 
   constructor(spec: ParseSpec) {
-    this.input = typeof spec.input == "string" ? stringInput(spec.input) : spec.input
+    this.input = typeof spec.input == "string" ? new StringInput(spec.input) : spec.input
     this.from = spec.from || 0
     this.to = spec.to ?? this.input.length
     this.fragments = spec.fragments || []
@@ -1442,7 +1442,7 @@ export interface ParseSpec {
 
 /// The base interface that parsers should conform to. Mostly used
 /// around nestable parsers.
-export abstract class AbstractParser {
+export abstract class Parser {
   /// Start a parse.
   abstract startParse(spec: ParseSpec): PartialParse
 
@@ -1474,9 +1474,6 @@ export interface Input {
   read(from: number, to: number): string
 }
 
-// Creates an `Input` that is backed by a single, flat string.
-export function stringInput(input: string): Input { return new StringInput(input) }
-
 class StringInput implements Input {
   constructor(readonly string: string) {}
 
@@ -1489,19 +1486,19 @@ class StringInput implements Input {
   read(from: number, to: number) { return this.string.slice(from, to) }
 }
 
-export class ScaffoldParser extends AbstractParser {
+export class ScaffoldParser extends Parser {
   /// @internal
   readonly scaffoldProp = new NodeProp<Tree>({perNode: true})
   /// @internal
-  readonly scaffold: AbstractParser
+  readonly scaffold: Parser
   /// @internal
-  readonly fill: AbstractParser
+  readonly fill: Parser
   /// @internal
   readonly scaffoldNodes: readonly NodeType[]
 
   constructor(config: {
-    scaffold: AbstractParser,
-    fill: AbstractParser,
+    scaffold: Parser,
+    fill: Parser,
     scaffoldNodes: readonly NodeType[]
   }) {
     super()

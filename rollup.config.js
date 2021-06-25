@@ -3,16 +3,14 @@ import {nodeResolve} from "@rollup/plugin-node-resolve"
 import commonJS from "@rollup/plugin-commonjs"
 
 export default {
-  input: "./src/tree.ts",
+  input: "./src/index.ts",
   output: [{
     format: "cjs",
-    file: "./dist/tree.cjs",
-    sourcemap: true,
+    file: "./dist/index.cjs",
     externalLiveBindings: false
   }, {
     format: "es",
-    file: "./dist/tree.es.js",
-    sourcemap: true,
+    file: "./dist/index.js",
     externalLiveBindings: false
   }],
   plugins: [
@@ -23,7 +21,6 @@ export default {
       tsconfigOverride: {
         compilerOptions: {
           lib: ["es5", "es6"],
-          sourceMap: true,
           target: "es6",
           strict: false,
           declaration: true
