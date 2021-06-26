@@ -42,7 +42,7 @@ export class NodeProp<T> {
 
   /// This is meant to be used with
   /// [`NodeSet.extend`](#common.NodeSet.extend) or
-  /// [`LRParser.withProps`](#lr.LRParser.withProps) to compute
+  /// [`LRParser.configure`](#lr.ParserConfig.props) to compute
   /// prop values for each node type in the set. Takes a [match
   /// object](#common.NodeType^match) or function that returns undefined
   /// if the node type doesn't get this prop, and the prop's value if
@@ -591,7 +591,7 @@ export interface SyntaxNode {
   toTree(): Tree
 
   /// Get the first child of the given type (which may be a [node
-  /// name](#common.NodeProp.name) or a [group
+  /// name](#common.NodeType.name) or a [group
   /// name](#common.NodeProp^group)). If `before` is non-null, only
   /// return children that occur somewhere after a node with that name
   /// or group. If `after` is non-null, only return children that
