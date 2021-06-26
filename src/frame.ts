@@ -1,73 +1,73 @@
 import {Parser, ParseSpec, FullParseSpec, PartialParse, InputGap} from "./parse"
 import {NodeProp, Tree, NodeType} from "./tree"
 
-/// A scaffold parser combines two parsers so that the resulting
+/// A framing parser combines two parsers so that the resulting
 /// parser...
 ///
-/// - Parses the document using the `scaffold` parser.
+/// - Parses the document using the `frame` parser.
 ///
 /// - Locates all the nodes in the resulting tree that represent the
-///   scaffolding.
+///   framing.
 ///
 /// - Parses the document using the `fill` parser, passing in the
-///   scaffolding nodes as gaps.
+///   frame nodes as gaps.
 ///
 /// - Returns the tree produced by the `fill` parser with the
-///   scaffolding nodes inserted into it.
+///   frame's nodes inserted into it.
 ///
 /// This is useful for things like templating languages, where the
-/// scaffold parser would manage the templating directives, and the
+/// frame parser would manage the templating directives, and the
 /// fill parser the base language.
 ///
 /// To get efficient incremental parsing, it is recommended to make
-/// sure your scaffold parser efficiently re-parses the empty space
-/// between the scaffolding, for example by making it an LR parser
+/// sure your framing parser efficiently re-parses the empty space
+/// between the frame, for example by making it an LR parser
 /// that doesn't treat gaps as single tokens (but uses one token per
 /// line or something similar).
-export class ScaffoldParser extends Parser {
+export class FramingParser extends Parser {
   /// @internal
-  readonly scaffoldProp = new NodeProp<Tree>({perNode: true})
+  readonly frameProp = new NodeProp<Tree>({perNode: true})
   /// @internal
-  readonly scaffold: Parser
+  readonly frame: Parser
   /// @internal
   readonly fill: Parser
   /// @internal
-  readonly scaffoldNodes: readonly NodeType[]
+  readonly frameNodes: readonly NodeType[]
 
-  /// Create a scaffold parser.
+  /// Create a framing parser.
   constructor(config: {
     /// The parser that determines the structure of the content.
-    scaffold: Parser,
-    /// The parser that fills in the spaces left in the scaffold.
+    frame: Parser,
+    /// The parser that fills in the spaces left in the frame.
     fill: Parser,
-    /// The node types (in the scaffold parser) that should create
+    /// The node types (in the frame parser) that should create
     /// gaps in the fill parser.
-    scaffoldNodes: readonly NodeType[]
+    frameNodes: readonly NodeType[]
   }) {
     super()
-    this.scaffold = config.scaffold
+    this.frame = config.frame
     this.fill = config.fill
-    this.scaffoldNodes = config.scaffoldNodes
+    this.frameNodes = config.frameNodes
   }
 
   startParse(spec: ParseSpec) {
-    return new ScaffoldParse(this, new FullParseSpec(spec))
+    return new FramingParse(this, new FullParseSpec(spec))
   }
 }
 
-class ScaffoldParse implements PartialParse {
+class FramingParse implements PartialParse {
   outerTree: Tree | null = null
   outer: PartialParse
   inner: PartialParse | null = null
   stoppedAt: null | number = null
 
   constructor(
-    readonly parser: ScaffoldParser,
+    readonly parser: FramingParser,
     readonly spec: FullParseSpec
   ) {
-    this.outer = parser.scaffold.startParse({
+    this.outer = parser.frame.startParse({
       ...spec,
-      fragments: spec.fragments.map(f => f.setTree(f.tree.prop(parser.scaffoldProp) || f.tree))
+      fragments: spec.fragments.map(f => f.setTree(f.tree.prop(parser.frameProp) || f.tree))
     })
   }
 
@@ -95,7 +95,7 @@ class ScaffoldParse implements PartialParse {
     this.outerTree = outerTree
     let gaps = [], {spec} = this
     scan: for (let c = outerTree.cursor();;) {
-      if (this.parser.scaffoldNodes.includes(c.type)) {
+      if (this.parser.frameNodes.includes(c.type)) {
         gaps.push(new InputGap(c.from, c.to, c.node.toTree()))
       } else if (c.firstChild()) {
         continue
@@ -114,6 +114,6 @@ class ScaffoldParse implements PartialParse {
 
   private finishParse(innerTree: Tree) {
     return new Tree(innerTree.type, innerTree.children, innerTree.positions, innerTree.length,
-                    innerTree.propValues.concat([[this.parser.scaffoldProp, this.outerTree]]))
+                    innerTree.propValues.concat([[this.parser.frameProp, this.outerTree]]))
   }
 }
