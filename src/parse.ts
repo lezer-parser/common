@@ -1,6 +1,6 @@
 import {Tree} from "./tree"
 
-/// The [`TreeFragment.applyChanges`](#tree.TreeFragment^applyChanges)
+/// The [`TreeFragment.applyChanges`](#common.TreeFragment^applyChanges)
 /// method expects changed ranges in this format.
 export interface ChangedRange {
   /// The start of the change in the start document
@@ -16,11 +16,11 @@ export interface ChangedRange {
 const enum Open { Start = 1, End = 2 }
 
 /// Tree fragments are used during [incremental
-/// parsing](#lezer.ParseOptions.fragments) to track parts of old
+/// parsing](#common.ParseSpec.fragments) to track parts of old
 /// trees that can be reused in a new parse. An array of fragments is
 /// used to track regions of an old tree whose nodes might be reused
 /// in new parses. Use the static
-/// [`applyChanges`](#tree.TreeFragment^applyChanges) method to update
+/// [`applyChanges`](#common.TreeFragment^applyChanges) method to update
 /// fragments for document changes.
 export class TreeFragment {
   /// @internal
@@ -90,7 +90,7 @@ export class TreeFragment {
   /// an existing set of fragments by replacing the ones that overlap
   /// with a tree with content from the new tree. When `partial` is
   /// true, the parse is treated as incomplete, and the resulting
-  /// fragment has [`openEnd`](#tree.TreeFragment.openEnd) set to
+  /// fragment has [`openEnd`](#common.TreeFragment.openEnd) set to
   /// true.
   static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
     let result = [new TreeFragment(0, tree.length, tree, 0, partial ? Open.End : 0)]
@@ -99,7 +99,7 @@ export class TreeFragment {
   }
 }
 
-/// Parsers may support [gaps](#tree.ParseSpec.gaps), which are
+/// Parsers may support [gaps](#common.ParseSpec.gaps), which are
 /// regions in the input that the parser skips entirely, as if they
 /// aren't there.
 export class InputGap {
@@ -110,7 +110,7 @@ export class InputGap {
     /// The end of the gap.
     readonly to: number,
     /// When given, instructs the parser to
-    /// [mount](#tree.NodeProp^mountedTree) a given tree at the
+    /// [mount](#common.NodeProp^mountedTree) a given tree at the
     /// position of the gap.
     readonly mount?: Tree
   ) {}
@@ -148,7 +148,7 @@ export interface PartialParse {
   readonly stoppedAt: number | null
 }
 
-/// A helper class that _resolves_ a [parse spec](#tree.ParseSpec)
+/// A helper class that _resolves_ a [parse spec](#common.ParseSpec)
 /// into a fully populated data structure.
 export class FullParseSpec {
   /// The input object.
@@ -175,20 +175,20 @@ export class FullParseSpec {
 /// The set of parameters given when starting a new parse.
 export interface ParseSpec {
   /// The document to parse, either as a string or as an object
-  /// conforming to the [`Input`](#tree.Input) interface.
+  /// conforming to the [`Input`](#common.Input) interface.
   input: string | Input
   /// The start position of the parsed range. Defaults to 0.
   from?: number
   /// The end position of the parsed range. Defaults to `input.length`.
   to?: number
-  /// An optional collection of [gaps](#tree.InputGap) that the parser
+  /// An optional collection of [gaps](#common.InputGap) that the parser
   /// should ignore. When given, these should be sorted by position
   /// (and may not overlap).
   gaps?: readonly InputGap[]
   /// A set of fragments from a previous parse to be used for
   /// incremental parsing. These should be aligned with the current
   /// document (through
-  /// [`TreeFragment.applyChanges`](#tree.TreeFragment^applyChanges))
+  /// [`TreeFragment.applyChanges`](#common.TreeFragment^applyChanges))
   /// if any changes were made since they were produced. The parser
   /// will try to reuse nodes from the fragments in the new parse,
   /// greatly speeding up the parse when it can do so for most of the

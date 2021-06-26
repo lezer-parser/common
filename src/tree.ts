@@ -5,7 +5,7 @@ let nextPropID = 0
 
 const CachedNode = new WeakMap<Tree, TreeNode>()
 
-/// Each [node type](#tree.NodeType) or [individual tree](#tree.Tree)
+/// Each [node type](#common.NodeType) or [individual tree](#common.Tree)
 /// can have metadata associated with it in props. Instances of this
 /// class represent prop names.
 export class NodeProp<T> {
@@ -13,7 +13,7 @@ export class NodeProp<T> {
   id: number
 
   /// Indicates whether this prop is stored per [node
-  /// type](#tree.NodeType) or per [tree node](#tree.Tree).
+  /// type](#common.NodeType) or per [tree node](#common.Tree).
   perNode: boolean
 
   /// A method that deserializes a value of this prop from a string.
@@ -23,13 +23,13 @@ export class NodeProp<T> {
 
   /// Create a new node prop type.
   constructor(config: {
-    /// The [deserialize](#tree.NodeProp.deserialize) function to use
+    /// The [deserialize](#common.NodeProp.deserialize) function to use
     /// for this prop. Defaults to a funciton that raises an error.
     deserialize?: (str: string) => T,
     /// By default, node props are stored in the [node
-    /// type](#tree.NodeType). It can sometimes be useful to directly
+    /// type](#common.NodeType). It can sometimes be useful to directly
     /// store information (usually related to the parsing algorithm)
-    /// in [nodes](#tree.Tree) themselves. Set this to true to enable
+    /// in [nodes](#common.Tree) themselves. Set this to true to enable
     /// that for this prop.
     perNode?: boolean
   } = {}) {
@@ -41,10 +41,10 @@ export class NodeProp<T> {
   }
 
   /// This is meant to be used with
-  /// [`NodeSet.extend`](#tree.NodeSet.extend) or
-  /// [`Parser.withProps`](#lezer.Parser.withProps) to compute prop
-  /// values for each node type in the set. Takes a [match
-  /// object](#tree.NodeType^match) or function that returns undefined
+  /// [`NodeSet.extend`](#common.NodeSet.extend) or
+  /// [`LRParser.withProps`](#lr.LRParser.withProps) to compute
+  /// prop values for each node type in the set. Takes a [match
+  /// object](#common.NodeType^match) or function that returns undefined
   /// if the node type doesn't get this prop, and the prop's value if
   /// it does.
   add(match: {[selector: string]: T} | ((type: NodeType) => T | undefined)): NodePropSource {
@@ -62,7 +62,7 @@ export class NodeProp<T> {
   /// for the node types of closing delimiters that match it.
   static closedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
 
-  /// The inverse of [`closedBy`](#tree.NodeProp^closedBy). This is
+  /// The inverse of [`closedBy`](#common.NodeProp^closedBy). This is
   /// attached to closing delimiters, holding an array of node names
   /// of types of matching opening delimiters.
   static openedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
@@ -72,7 +72,7 @@ export class NodeProp<T> {
   /// `"Expression"` group).
   static group = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
 
-  /// The hash of the [context](#lezer.ContextTracker.constructor)
+  /// The hash of the [context](#lr.ContextTracker.constructor)
   /// that the node was parsed in, if any. Used to limit reuse of
   /// contextual nodes.
   static contextHash = new NodeProp<number>({perNode: true})
@@ -89,7 +89,7 @@ export class NodeProp<T> {
   static mountedTree = new NodeProp<Tree>({perNode: true})
 }
 
-/// Type returned by [`NodeProp.add`](#tree.NodeProp.add). Describes
+/// Type returned by [`NodeProp.add`](#common.NodeProp.add). Describes
 /// whether a prop should be added to a given node type in a node set,
 /// and what value it should have.
 export type NodePropSource = (type: NodeType) => null | [NodeProp<any>, any]
@@ -123,21 +123,21 @@ export class NodeType {
 
   static define(spec: {
     /// The ID of the node type. When this type is used in a
-    /// [set](#tree.NodeSet), the ID must correspond to its index in
+    /// [set](#common.NodeSet), the ID must correspond to its index in
     /// the type array.
     id: number, 
     /// The name of the node type. Leave empty to define an anonymous
     /// node.
     name?: string,
-    /// [Node props](#tree.NodeProp) to assign to the type. The value
+    /// [Node props](#common.NodeProp) to assign to the type. The value
     /// given for any given prop should correspond to the prop's type.
     props?: readonly ([NodeProp<any>, any] | NodePropSource)[],
-    /// Whether this is a [top node](#tree.NodeType.isTop).
+    /// Whether this is a [top node](#common.NodeType.isTop).
     top?: boolean,
     /// Whether this node counts as an [error
-    /// node](#tree.NodeType.isError).
+    /// node](#common.NodeType.isError).
     error?: boolean,
-    /// Whether this node is a [skipped](#tree.NodeType.isSkipped)
+    /// Whether this node is a [skipped](#common.NodeType.isSkipped)
     /// node.
     skipped?: boolean
   }) {
@@ -173,7 +173,7 @@ export class NodeType {
   get isAnonymous() { return (this.flags & NodeFlag.Anonymous) > 0 }
 
   /// Returns true when this node's name or one of its
-  /// [groups](#tree.NodeProp^group) matches the given string.
+  /// [groups](#common.NodeProp^group) matches the given string.
   is(name: string | number) {
     if (typeof name == 'string') {
       if (this.name == name) return true
@@ -188,8 +188,8 @@ export class NodeType {
 
   /// Create a function from node types to arbitrary values by
   /// specifying an object whose property names are node or
-  /// [group](#tree.NodeProp^group) names. Often useful with
-  /// [`NodeProp.add`](#tree.NodeProp.add). You can put multiple
+  /// [group](#common.NodeProp^group) names. Often useful with
+  /// [`NodeProp.add`](#common.NodeProp.add). You can put multiple
   /// names, separated by spaces, in a single property name to map
   /// multiple node names to a single value.
   static match<T>(map: {[selector: string]: T}): (node: NodeType) => T | undefined {
@@ -208,8 +208,8 @@ export class NodeType {
 /// A node set holds a collection of node types. It is used to
 /// compactly represent trees by storing their type ids, rather than a
 /// full pointer to the type object, in a numeric array. Each parser
-/// [has](#lezer.LRParser.nodeSet) a node set, and [tree
-/// buffers](#tree.TreeBuffer) can only store collections of nodes
+/// [has](#lr.LRParser.nodeSet) a node set, and [tree
+/// buffers](#common.TreeBuffer) can only store collections of nodes
 /// from the same set. A set can have a maximum of 2**16 (65536) node
 /// types in it, so that the ids fit into 16-bit typed array slots.
 export class NodeSet {
@@ -225,7 +225,7 @@ export class NodeSet {
 
   /// Create a copy of this set with some node properties added. The
   /// arguments to this method should be created with
-  /// [`NodeProp.add`](#tree.NodeProp.add).
+  /// [`NodeProp.add`](#common.NodeProp.add).
   extend(...props: NodePropSource[]): NodeSet {
     let newTypes: NodeType[] = []
     for (let type of this.types) {
@@ -253,15 +253,15 @@ export class NodeSet {
 ///
 /// However, when you want to actually work with tree nodes, this
 /// representation is very awkward, so most client code will want to
-/// use the [`TreeCursor`](#tree.TreeCursor) or
-/// [`SyntaxNode`](#tree.SyntaxNode) interface instead, which provides
+/// use the [`TreeCursor`](#common.TreeCursor) or
+/// [`SyntaxNode`](#common.SyntaxNode) interface instead, which provides
 /// a view on some part of this data structure, and can be used to
 /// move around to adjacent nodes.
 export class Tree {
   /// @internal
   props: null | {[id: number]: any} = null
 
-  /// Construct a new tree. See also [`Tree.build`](#tree.Tree^build).
+  /// Construct a new tree. See also [`Tree.build`](#common.Tree^build).
   constructor(
     /// The type of the top node.
     readonly type: NodeType,
@@ -272,7 +272,7 @@ export class Tree {
     readonly positions: readonly number[],
     /// The total length of this tree
     readonly length: number,
-    /// Per-node [node props](#tree.NodeProp) to associate with this node.
+    /// Per-node [node props](#common.NodeProp) to associate with this node.
     props?: readonly [NodeProp<any> | number, any][]
   ) {
     if (props && props.length) {
@@ -301,8 +301,8 @@ export class Tree {
   /// The empty tree
   static empty = new Tree(NodeType.none, [], [], 0)
 
-  /// Get a [tree cursor](#tree.TreeCursor) rooted at this tree. When
-  /// `pos` is given, the cursor is [moved](#tree.TreeCursor.moveTo)
+  /// Get a [tree cursor](#common.TreeCursor) rooted at this tree. When
+  /// `pos` is given, the cursor is [moved](#common.TreeCursor.moveTo)
   /// to the given position and side.
   cursor(pos?: number, side: -1 | 0 | 1 = 0): TreeCursor {
     let scope = (pos != null && CachedNode.get(this)) || (this.topNode as TreeNode)
@@ -314,20 +314,20 @@ export class Tree {
     return cursor
   }
 
-  /// Get a [tree cursor](#tree.TreeCursor) that, unlike regular
+  /// Get a [tree cursor](#common.TreeCursor) that, unlike regular
   /// cursors, doesn't skip through
-  /// [anonymous](#tree.NodeType.isAnonymous) nodes.
+  /// [anonymous](#common.NodeType.isAnonymous) nodes.
   fullCursor(): TreeCursor {
     return new TreeCursor(this.topNode as TreeNode, true)
   }
 
-  /// Get a [syntax node](#tree.SyntaxNode) object for the top of the
+  /// Get a [syntax node](#common.SyntaxNode) object for the top of the
   /// tree.
   get topNode(): SyntaxNode {
     return new TreeNode(this, 0, 0, null)
   }
 
-  /// Get the [syntax node](#tree.SyntaxNode) at the given position.
+  /// Get the [syntax node](#common.SyntaxNode) at the given position.
   /// If `side` is -1, this will move into nodes that end at the
   /// position. If 1, it'll move into nodes that start at the
   /// position. With 0, it'll only enter nodes that cover the position
@@ -364,14 +364,14 @@ export class Tree {
     }
   }
 
-  /// Get the value of the given [node prop](#tree.NodeProp) for this
+  /// Get the value of the given [node prop](#common.NodeProp) for this
   /// node. Works with both per-node and per-type props.
   prop<T>(prop: NodeProp<T>): T | undefined {
     return !prop.perNode ? this.type.prop(prop) : this.props ? this.props[prop.id] : undefined
   }
 
-  /// Returns the node's [per-node props](#tree.NodeProp.perNode) in a
-  /// format that can be passed to the [`Tree`](#tree.Tree)
+  /// Returns the node's [per-node props](#common.NodeProp.perNode) in a
+  /// format that can be passed to the [`Tree`](#common.Tree)
   /// constructor.
   get propValues(): readonly [NodeProp<any> | number, any][] {
     let result: [NodeProp<any> | number, any][] = []
@@ -381,7 +381,7 @@ export class Tree {
 
   /// Balance the direct children of this tree, producing a copy of
   /// which may have children grouped into subtrees with type
-  /// [`NodeType.none`](#tree.NodeType^none).
+  /// [`NodeType.none`](#common.NodeType^none).
   balance(config: {
     makeTree?: (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => Tree
   } = {}) {
@@ -431,7 +431,7 @@ type BuildData = {
   /// child is used when not provided.
   length?: number,
   /// The maximum buffer length to use. Defaults to
-  /// [`DefaultBufferLength`](#tree.DefaultBufferLength).
+  /// [`DefaultBufferLength`](#common.DefaultBufferLength).
   maxBufferLength?: number,
   /// An optional array holding reused nodes that the buffer can refer
   /// to.
@@ -550,7 +550,7 @@ const enum After { None = -1e8 }
 
 /// A syntax node provides an immutable pointer to a given node in a
 /// tree. When iterating over large amounts of nodes, you may want to
-/// use a mutable [cursor](#tree.TreeCursor) instead, which is more
+/// use a mutable [cursor](#common.TreeCursor) instead, which is more
 /// efficient.
 export interface SyntaxNode {
   /// The type of the node.
@@ -576,29 +576,29 @@ export interface SyntaxNode {
   nextSibling: SyntaxNode | null
   /// This node's previous sibling.
   prevSibling: SyntaxNode | null
-  /// A [tree cursor](#tree.TreeCursor) starting at this node.
+  /// A [tree cursor](#common.TreeCursor) starting at this node.
   cursor: TreeCursor
   /// Find the node around, before (if `side` is -1), or after (`side`
   /// is 1) the given position. Will look in parent nodes if the
   /// position is outside this node.
   resolve(pos: number, side?: -1 | 0 | 1): SyntaxNode
-  /// Get the [tree](#tree.Tree) that represents the current node, if
+  /// Get the [tree](#common.Tree) that represents the current node, if
   /// any. Will return null when the node is in a [tree
-  /// buffer](#tree.TreeBuffer).
+  /// buffer](#common.TreeBuffer).
   tree: Tree | null
-  /// Get a [tree](#tree.Tree) for this node. Will allocate one if it
+  /// Get a [tree](#common.Tree) for this node. Will allocate one if it
   /// points into a buffer.
   toTree(): Tree
 
   /// Get the first child of the given type (which may be a [node
-  /// name](#tree.NodeProp.name) or a [group
-  /// name](#tree.NodeProp^group)). If `before` is non-null, only
+  /// name](#common.NodeProp.name) or a [group
+  /// name](#common.NodeProp^group)). If `before` is non-null, only
   /// return children that occur somewhere after a node with that name
   /// or group. If `after` is non-null, only return children that
   /// occur somewhere before a node with that name or group.
   getChild(type: string | number, before?: string | number | null, after?: string | number | null): SyntaxNode | null
 
-  /// Like [`getChild`](#tree.SyntaxNode.getChild), but return all
+  /// Like [`getChild`](#common.SyntaxNode.getChild), but return all
   /// matching children, not just the first.
   getChildren(type: string | number, before?: string | number | null, after?: string | number | null): SyntaxNode[]
 }
@@ -987,7 +987,7 @@ export class TreeCursor {
     return this
   }
 
-  /// Get a [syntax node](#tree.SyntaxNode) at the cursor's current
+  /// Get a [syntax node](#common.SyntaxNode) at the cursor's current
   /// position.
   get node(): SyntaxNode {
     if (!this.buffer) return this._tree
@@ -1008,9 +1008,9 @@ export class TreeCursor {
     return this.bufferNode = new BufferNode(this.buffer, result, this.index)
   }
 
-  /// Get the [tree](#tree.Tree) that represents the current node, if
+  /// Get the [tree](#common.Tree) that represents the current node, if
   /// any. Will return null when the node is in a [tree
-  /// buffer](#tree.TreeBuffer).
+  /// buffer](#common.TreeBuffer).
   get tree(): Tree | null {
     return this.buffer ? null : this._tree.node
   }
