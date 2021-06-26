@@ -1,17 +1,18 @@
-/// The default maximum length of a `TreeBuffer` node.
+/// The default maximum length of a `TreeBuffer` node (1024).
 export const DefaultBufferLength = 1024
 
 let nextPropID = 0
 
 const CachedNode = new WeakMap<Tree, TreeNode>()
 
-/// Each [node type](#tree.NodeType) can have metadata associated with
-/// it in props. Instances of this class represent prop names.
+/// Each [node type](#tree.NodeType) or [individual tree](#tree.Tree)
+/// can have metadata associated with it in props. Instances of this
+/// class represent prop names.
 export class NodeProp<T> {
   /// @internal
   id: number
 
-  /// Inidicates whether this prop is stored per [node
+  /// Indicates whether this prop is stored per [node
   /// type](#tree.NodeType) or per [tree node](#tree.Tree).
   perNode: boolean
 
@@ -47,6 +48,7 @@ export class NodeProp<T> {
   /// if the node type doesn't get this prop, and the prop's value if
   /// it does.
   add(match: {[selector: string]: T} | ((type: NodeType) => T | undefined)): NodePropSource {
+    if (this.perNode) throw new RangeError("Can't add per-node props to node types")
     if (typeof match != "function") match = NodeType.match(match)
     return (type) => {
       let result = (match as (type: NodeType) => T | undefined)(type)
@@ -78,7 +80,7 @@ export class NodeProp<T> {
   /// The distance beyond the end of the node that the tokenizer
   /// looked ahead for any of the tokens inside the node. (The LR
   /// parser only stores this when it is larger than 25, for
-  /// efficiency reasons).
+  /// efficiency reasons.)
   static lookAhead = new NodeProp<number>({perNode: true})
 
   /// This per-node prop is used to replace a given node by another
@@ -92,7 +94,7 @@ export class NodeProp<T> {
 /// and what value it should have.
 export type NodePropSource = (type: NodeType) => null | [NodeProp<any>, any]
 
-// Note: this is duplicated in lezer/src/constants.ts
+// Note: this is duplicated in lr/src/constants.ts
 const enum NodeFlag {
   Top = 1,
   Skipped = 2,
@@ -130,7 +132,7 @@ export class NodeType {
     /// [Node props](#tree.NodeProp) to assign to the type. The value
     /// given for any given prop should correspond to the prop's type.
     props?: readonly ([NodeProp<any>, any] | NodePropSource)[],
-    /// Whether is is a [top node](#tree.NodeType.isTop).
+    /// Whether this is a [top node](#tree.NodeType.isTop).
     top?: boolean,
     /// Whether this node counts as an [error
     /// node](#tree.NodeType.isError).
@@ -205,12 +207,11 @@ export class NodeType {
 
 /// A node set holds a collection of node types. It is used to
 /// compactly represent trees by storing their type ids, rather than a
-/// full pointer to the type object, in a number array. Each parser
-/// [has](#lezer.Parser.nodeSet) a node set, and [tree
+/// full pointer to the type object, in a numeric array. Each parser
+/// [has](#lezer.LRParser.nodeSet) a node set, and [tree
 /// buffers](#tree.TreeBuffer) can only store collections of nodes
-/// from the same set. A set can have a maximum of 2**16 (65536)
-/// node types in it, so that the ids fit into 16-bit typed array
-/// slots.
+/// from the same set. A set can have a maximum of 2**16 (65536) node
+/// types in it, so that the ids fit into 16-bit typed array slots.
 export class NodeSet {
   /// Create a set with the given types. The `id` property of each
   /// type should correspond to its position within the array.
@@ -252,20 +253,19 @@ export class NodeSet {
 ///
 /// However, when you want to actually work with tree nodes, this
 /// representation is very awkward, so most client code will want to
-/// use the `TreeCursor` interface instead, which provides a view on
-/// some part of this data structure, and can be used to move around
-/// to adjacent nodes.
+/// use the [`TreeCursor`](#tree.TreeCursor) or
+/// [`SyntaxNode`](#tree.SyntaxNode) interface instead, which provides
+/// a view on some part of this data structure, and can be used to
+/// move around to adjacent nodes.
 export class Tree {
   /// @internal
   props: null | {[id: number]: any} = null
 
-  /// Construct a new tree. You usually want to go through
-  /// [`Tree.build`](#tree.Tree^build) instead.
+  /// Construct a new tree. See also [`Tree.build`](#tree.Tree^build).
   constructor(
+    /// The type of the top node.
     readonly type: NodeType,
-    /// The tree's child nodes. Children small enough to fit in a
-    /// `TreeBuffer will be represented as such, other children can be
-    /// further `Tree` instances with their own internal structure.
+    /// This node's child nodes.
     readonly children: readonly (Tree | TreeBuffer)[],
     /// The positions (offsets relative to the start of this tree) of
     /// the children.
@@ -315,8 +315,8 @@ export class Tree {
   }
 
   /// Get a [tree cursor](#tree.TreeCursor) that, unlike regular
-  /// cursors, doesn't skip [anonymous](#tree.NodeType.isAnonymous)
-  /// nodes.
+  /// cursors, doesn't skip through
+  /// [anonymous](#tree.NodeType.isAnonymous) nodes.
   fullCursor(): TreeCursor {
     return new TreeCursor(this.topNode as TreeNode, true)
   }
@@ -339,23 +339,23 @@ export class Tree {
   /// Iterate over the tree and its children, calling `enter` for any
   /// node that touches the `from`/`to` region (if given) before
   /// running over such a node's children, and `leave` (if given) when
-  /// leaving the node. When `enter` returns `false`, the given node
-  /// will not have its children iterated over (or `leave` called).
+  /// leaving the node. When `enter` returns `false`, that node will
+  /// not have its children iterated over (or `leave` called).
   iterate(spec: {
-    enter(type: NodeType, from: number, to: number): false | void,
-    leave?(type: NodeType, from: number, to: number): void,
+    enter(type: NodeType, from: number, to: number, get: () => SyntaxNode): false | void,
+    leave?(type: NodeType, from: number, to: number, get: () => SyntaxNode): void,
     from?: number,
     to?: number
   }) {
     let {enter, leave, from = 0, to = this.length} = spec
-    for (let c = this.cursor();;) {
+    for (let c = this.cursor(), get = () => c.node;;) {
       let mustLeave = false
-      if (c.from <= to && c.to >= from && (c.type.isAnonymous || enter(c.type, c.from, c.to) !== false)) {
+      if (c.from <= to && c.to >= from && (c.type.isAnonymous || enter(c.type, c.from, c.to, get) !== false)) {
         if (c.firstChild()) continue
         if (!c.type.isAnonymous) mustLeave = true
       }
       for (;;) {
-        if (mustLeave && leave) leave(c.type, c.from, c.to)
+        if (mustLeave && leave) leave(c.type, c.from, c.to, get)
         mustLeave = c.type.isAnonymous
         if (c.nextSibling()) break
         if (!c.parent()) return
@@ -379,7 +379,9 @@ export class Tree {
     return result
   }
 
-  /// Balance the direct children of this tree.
+  /// Balance the direct children of this tree, producing a copy of
+  /// which may have children grouped into subtrees with type
+  /// [`NodeType.none`](#tree.NodeType^none).
   balance(config: {
     makeTree?: (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => Tree
   } = {}) {
@@ -439,6 +441,44 @@ type BuildData = {
   /// The first node type that indicates repeat constructs in this
   /// grammar.
   minRepeatType?: number
+}
+
+/// This is used by `Tree.build` as an abstraction for iterating over
+/// a tree buffer. A cursor initially points at the very last element
+/// in the buffer. Every time `next()` is called it moves on to the
+/// previous one.
+export interface BufferCursor {
+  /// The current buffer position (four times the number of nodes
+  /// remaining).
+  pos: number
+  /// The node ID of the next node in the buffer.
+  id: number
+  /// The start position of the next node in the buffer.
+  start: number
+  /// The end position of the next node.
+  end: number
+  /// The size of the next node (the number of nodes inside, counting
+  /// the node itself, times 4).
+  size: number
+  /// Moves `this.pos` down by 4.
+  next(): void
+  /// Create a copy of this cursor.
+  fork(): BufferCursor
+}
+
+class FlatBufferCursor implements BufferCursor {
+  constructor(readonly buffer: readonly number[], public index: number) {}
+
+  get id() { return this.buffer[this.index - 4] }
+  get start() { return this.buffer[this.index - 3] }
+  get end() { return this.buffer[this.index - 2] }
+  get size() { return this.buffer[this.index - 1] }
+
+  get pos() { return this.index }
+
+  next() { this.index -= 4 }
+
+  fork() { return new FlatBufferCursor(this.buffer, this.index) }
 }
 
 /// Tree buffers contain (type, start, end, endIndex) quads for each
@@ -508,7 +548,7 @@ export class TreeBuffer {
 
 const enum After { None = -1e8 }
 
-/// A syntax node provides an immutable pointer at a given node in a
+/// A syntax node provides an immutable pointer to a given node in a
 /// tree. When iterating over large amounts of nodes, you may want to
 /// use a mutable [cursor](#tree.TreeCursor) instead, which is more
 /// efficient.
@@ -919,7 +959,7 @@ export class TreeCursor {
   next() { return this.move(1) }
 
   /// Move to the next node in a last-to-first pre-order traveral. A
-  /// node is followed by ist last child or, if it has none, its
+  /// node is followed by its last child or, if it has none, its
   /// previous sibling or the previous sibling of the first parent
   /// node that has one.
   prev() { return this.move(-1) }
@@ -978,44 +1018,6 @@ export class TreeCursor {
 
 function hasChild(tree: Tree): boolean {
   return tree.children.some(ch => ch instanceof TreeBuffer || !ch.type.isAnonymous || hasChild(ch))
-}
-
-/// This is used by `Tree.build` as an abstraction for iterating over
-/// a tree buffer. A cursor initially points at the very last element
-/// in the buffer. Every time `next()` is called it moves on to the
-/// previous one.
-export interface BufferCursor {
-  /// The current buffer position (four times the number of nodes
-  /// remaining).
-  pos: number
-  /// The node ID of the next node in the buffer.
-  id: number
-  /// The start position of the next node in the buffer.
-  start: number
-  /// The end position of the next node.
-  end: number
-  /// The size of the next node (the number of nodes inside, counting
-  /// the node itself, times 4).
-  size: number
-  /// Moves `this.pos` down by 4.
-  next(): void
-  /// Create a copy of this cursor.
-  fork(): BufferCursor
-}
-
-class FlatBufferCursor implements BufferCursor {
-  constructor(readonly buffer: readonly number[], public index: number) {}
-
-  get id() { return this.buffer[this.index - 4] }
-  get start() { return this.buffer[this.index - 3] }
-  get end() { return this.buffer[this.index - 2] }
-  get size() { return this.buffer[this.index - 1] }
-
-  get pos() { return this.index }
-
-  next() { this.index -= 4 }
-
-  fork() { return new FlatBufferCursor(this.buffer, this.index) }
 }
 
 const enum Balance { BranchFactor = 8 }

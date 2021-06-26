@@ -24,16 +24,24 @@
 
 @BufferCursor
 
-### Incremental parsing
+### Parsing
 
-@ChangedRange
+@Parser
 
-@TreeFragment
+@ParseSpec
 
-@PartialParse
+@FullParseSpec
 
 @Input
 
-@stringInput
+@PartialParse
 
-@ParseContext
+@InputGap
+
+### Incremental Parsing
+
+@TreeFragment
+
+@ChangedRange
+
+@ScaffoldParser
