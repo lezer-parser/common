@@ -216,7 +216,7 @@ export abstract class Parser {
 /// write an implementation of it.
 export interface Input {
   /// The length of the document.
-  length: number
+  readonly length: number
   /// Get the chunk after the given position. The returned string
   /// should start at `from` and, if that isn't the end of the
   /// document, may be of any length greater than zero.
@@ -226,7 +226,7 @@ export interface Input {
   /// them for line breaks. When this is true, the result of `chunk()`
   /// should either be a single line break, or the content between
   /// `from` and the next line break.
-  lineChunks: boolean
+  readonly lineChunks: boolean
   /// Read the part of the document between the given positions.
   read(from: number, to: number): string
 }
