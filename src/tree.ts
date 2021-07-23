@@ -3,7 +3,9 @@ export const DefaultBufferLength = 1024
 
 let nextPropID = 0
 
-const CachedNode = new WeakMap<Tree, TreeNode>()
+export class Range {
+  constructor(readonly from: number, readonly to: number) {}
+}
 
 /// Each [node type](#common.NodeType) or [individual tree](#common.Tree)
 /// can have metadata associated with it in props. Instances of this
@@ -242,6 +244,8 @@ export class NodeSet {
     return new NodeSet(newTypes)
   }
 }
+
+const CachedNode = new WeakMap<Tree, TreeNode>()
 
 /// A piece of syntax tree. There are two ways to approach these
 /// trees: the way they are actually stored in memory, and the

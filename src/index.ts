@@ -1,3 +1,2 @@
 export {DefaultBufferLength, NodeProp, NodePropSource, NodeType, NodeSet, Tree, TreeBuffer, SyntaxNode, TreeCursor, BufferCursor} from "./tree"
-export {ChangedRange, TreeFragment, InputGap, PartialParse, FullParseSpec, ParseSpec, Parser, Input} from "./parse"
-export {FramingParser} from "./frame"
+export {ChangedRange, TreeFragment, PartialParse, Parser, Input} from "./parse"

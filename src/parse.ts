@@ -1,4 +1,4 @@
-import {Tree} from "./tree"
+import {Tree, NodeSet, Range} from "./tree"
 
 /// The [`TreeFragment.applyChanges`](#common.TreeFragment^applyChanges)
 /// method expects changed ranges in this format.
@@ -52,9 +52,16 @@ export class TreeFragment {
   /// full-document parse, or the start of a change.
   get openEnd() { return (this.open & Open.End) > 0 }
 
-  /// Create a copy of this fragment holding a different tree.
-  setTree(tree: Tree) {
-    return new TreeFragment(this.from, this.to, tree, this.offset, this.open)
+  /// Create a set of fragments from a freshly parsed tree, or update
+  /// an existing set of fragments by replacing the ones that overlap
+  /// with a tree with content from the new tree. When `partial` is
+  /// true, the parse is treated as incomplete, and the resulting
+  /// fragment has [`openEnd`](#common.TreeFragment.openEnd) set to
+  /// true.
+  static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
+    let result = [new TreeFragment(0, tree.length, tree, 0, partial ? Open.End : 0)]
+    for (let f of fragments) if (f.to > tree.length) result.push(f)
+    return result
   }
 
   /// Apply a set of edits to an array of fragments, removing or
@@ -85,46 +92,6 @@ export class TreeFragment {
     }
     return result
   }
-
-  /// Create a set of fragments from a freshly parsed tree, or update
-  /// an existing set of fragments by replacing the ones that overlap
-  /// with a tree with content from the new tree. When `partial` is
-  /// true, the parse is treated as incomplete, and the resulting
-  /// fragment has [`openEnd`](#common.TreeFragment.openEnd) set to
-  /// true.
-  static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
-    let result = [new TreeFragment(0, tree.length, tree, 0, partial ? Open.End : 0)]
-    for (let f of fragments) if (f.to > tree.length) result.push(f)
-    return result
-  }
-}
-
-/// Parsers may support [gaps](#common.ParseSpec.gaps), which are
-/// regions in the input that the parser skips entirely, as if they
-/// aren't there.
-export class InputGap {
-  /// Create an input gap.
-  constructor(
-    /// The start of the gap.
-    readonly from: number,
-    /// The end of the gap.
-    readonly to: number,
-    /// When given, instructs the parser to
-    /// [mount](#common.NodeProp^mountedTree) a given tree at the
-    /// position of the gap.
-    readonly mount?: Tree
-  ) {}
-
-  /// Process a set of input gaps to pass them to an inner parser.
-  /// Removes gaps outside of the given range, and optionally adds
-  /// additional gaps, making sure the resulting collection is sorted.
-  static inner(
-    from: number, to: number, outer: readonly InputGap[] | undefined, add?: readonly InputGap[]
-  ): readonly InputGap[] | undefined {
-    if (!outer) return add
-    let rest = outer.filter(g => g.from >= from && g.to <= to && (!add || !add.some(e => e.from <= g.from && e.to >= g.to)))
-    return !rest.length ? add : add ? rest.concat(add).sort((a, b) => a.from - b.from) : rest
-  }
 }
 
 /// Interface used to represent an in-progress parse, which can be
@@ -133,10 +100,12 @@ export interface PartialParse {
   /// Advance the parse state by some amount. Will return the finished
   /// syntax tree when the parse completes.
   advance(): Tree | null
+
   /// The position up to which the document has been parsed. Note
   /// that, in multi-pass parsers, this will stay back until the last
   /// pass has moved past a given position.
   readonly parsedPos: number
+
   /// Tell the parse to not advance beyond the given position.
   /// `advance` will return a tree when the parse has reached the
   /// position. Note that, depending on the parser algorithm and the
@@ -144,66 +113,47 @@ export interface PartialParse {
   /// contain nodes beyond the position. It is not allowed to call
   /// `stopAt` a second time with a higher position.
   stopAt(pos: number): void
+
   /// Reports whether `stopAt` has been called on this parse.
   readonly stoppedAt: number | null
 }
 
-/// A helper class that _resolves_ a [parse spec](#common.ParseSpec)
-/// into a fully populated data structure.
-export class FullParseSpec {
-  /// The input object.
-  input: Input
-  /// The start of the parsed range.
-  from: number
-  /// The end of the parsed range.
-  to: number
-  /// The reusable tree fragments available.
-  fragments: readonly TreeFragment[]
-  /// Any gaps passed to the parser.
-  gaps: readonly InputGap[] | undefined
-
-  /// Resolve the given partial spec.
-  constructor(spec: ParseSpec) {
-    this.input = typeof spec.input == "string" ? new StringInput(spec.input) : spec.input
-    this.from = spec.from || 0
-    this.to = spec.to ?? this.input.length
-    this.fragments = spec.fragments || []
-    this.gaps = spec.gaps && spec.gaps.length ? spec.gaps : undefined
-  }
-}
-
-/// The set of parameters given when starting a new parse.
-export interface ParseSpec {
-  /// The document to parse, either as a string or as an object
-  /// conforming to the [`Input`](#common.Input) interface.
-  input: string | Input
-  /// The start position of the parsed range. Defaults to 0.
-  from?: number
-  /// The end position of the parsed range. Defaults to `input.length`.
-  to?: number
-  /// An optional collection of [gaps](#common.InputGap) that the parser
-  /// should ignore. When given, these should be sorted by position
-  /// (and may not overlap).
-  gaps?: readonly InputGap[]
-  /// A set of fragments from a previous parse to be used for
-  /// incremental parsing. These should be aligned with the current
-  /// document (through
-  /// [`TreeFragment.applyChanges`](#common.TreeFragment^applyChanges))
-  /// if any changes were made since they were produced. The parser
-  /// will try to reuse nodes from the fragments in the new parse,
-  /// greatly speeding up the parse when it can do so for most of the
-  /// document.
-  fragments?: readonly TreeFragment[]
-}
-
 /// A superclass that parsers should extend.
 export abstract class Parser {
-  /// Start a parse.
-  abstract startParse(spec: ParseSpec): PartialParse
+  /// Initialize a parser.
+  constructor(nodeSet: NodeSet) {
+    this.nodeSet = nodeSet
+  }
+
+  /// The nodes used in the root trees emitted by this parser.
+  nodeSet: NodeSet
+
+  /// Start a parse for a single tree. This is the method concrete
+  /// parser implementations must implement. Called by `startParse`,
+  /// with the optional arguments resolved.
+  abstract startParseInner(
+    input: Input,
+    fragments: readonly TreeFragment[],
+    ranges: readonly {from: number, to: number}[]
+  ): PartialParse
+
+  startParse(
+    input: Input | string,
+    fragments?: readonly TreeFragment[],
+    ranges?: readonly {from: number, to: number}[]
+  ): PartialParse {
+    if (typeof input == "string") input = new StringInput(input)
+    ranges = ranges && ranges.length ? ranges.map(r => new Range(r.from, r.to)) : [new Range(0, input.length)]
+    return this.startParseInner(input, fragments || [], ranges)
+  }
 
   /// Run a full parse, returning the resulting tree.
-  parse(spec: ParseSpec) {
-    let parse = this.startParse(spec)
+  parse(
+    input: Input | string,
+    fragments?: readonly TreeFragment[],
+    ranges?: readonly {from: number, to: number}[]
+  ) {
+    let parse = this.startParse(input, fragments, ranges)
     for (;;) {
       let done = parse.advance()
       if (done) return done
