@@ -139,17 +139,6 @@ describe("SyntaxNode", () => {
     ist(anonTree.topNode.childAfter(1)!.name, "b")
   })
 
-  it("enters mounted trees", () => {
-    let tree = mk("aaa[bbb]aaa", {
-      props: {3: [NodeProp.mountedTree, mk("((c))")]}
-    })
-    ist(tree.toString(), "T(a,a,a,T(Pa(Pa(c))),a,a,a)")
-    ist(tree.topNode.childAfter(3)!.name, "T")
-    ist(tree.topNode.childAfter(3)!.firstChild!.from, 3)
-    ist(tree.resolve(5, 1).name, "c")
-    ist(tree.topNode.childAfter(3)!.parent!.name, "T")
-  })
-
   it("allows access to the underlying tree", () => {
     let tree = mk("aaa[bbbbb(bb)bbbbbbb]aaa")
     let node = tree.topNode.firstChild!
