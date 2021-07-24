@@ -1,3 +1,5 @@
+import {Parser} from "./parse"
+
 /// The default maximum length of a `TreeBuffer` node (1024).
 export const DefaultBufferLength = 1024
 
@@ -85,10 +87,30 @@ export class NodeProp<T> {
   /// efficiency reasons.)
   static lookAhead = new NodeProp<number>({perNode: true})
 
-  /// This per-node prop is used to replace a given node by another
-  /// during iteration. This is useful to include trees from nested
-  /// parses in another language's tree.
-  static mountedTree = new NodeProp<Tree>({perNode: true})
+  /// This per-node prop is used to replace a given node, or part of a
+  /// node, with another tree. This is useful to include trees from
+  /// different languages.
+  static mounted = new NodeProp<MountedTree>({perNode: true})
+}
+
+/// A mounted tree, which can be [stored](#common.NodeProp^mounted) on
+/// a tree node to indicate that parts of its content are
+/// represented by another tree.
+export class MountedTree {
+  constructor(
+    /// The inner tree.
+    readonly tree: Tree,
+    /// If this is null, this tree replaces the entire node (it will
+    /// be included in the regular iteration instead of its host
+    /// node). If not, only the given ranges are considered to be
+    /// covered by this tree. This is used for trees that are mixed in
+    /// a way that isn't strictly hierarchical. Such mounted trees are
+    /// only entered by [`resolveInner`](#common.Tree.resolveInner)
+    /// and [`enter`](#common.SyntaxNode.enter).
+    readonly overlay: readonly {from: number, to: number}[] | null,
+    /// The parser used to create this subtree.
+    readonly parser: Parser
+  ) {}
 }
 
 /// Type returned by [`NodeProp.add`](#common.NodeProp.add). Describes
@@ -287,8 +309,8 @@ export class Tree {
 
   /// @internal
   toString(): string {
-    let mounted = this.prop(NodeProp.mountedTree)
-    if (mounted) return mounted.toString()
+    let mounted = this.prop(NodeProp.mounted)
+    if (mounted && !mounted.overlay) return mounted.tree.toString()
     let children = ""
     for (let ch of this.children) {
       let str = ch.toString()
@@ -338,6 +360,20 @@ export class Tree {
   /// from both sides.
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     return this.cursor(pos, side).node
+  }
+
+  /// Like [`resolve`](#common.Tree.resolve), but will enter
+  /// [overlaid](#MountedTree.overlay) nodes, producing a syntax node
+  /// pointing into the innermost overlaid tree at the given position
+  /// (with parent links going through all parent structure, including
+  /// the host trees).
+  resolveInner(pos: number, side: -1 | 0 | 1 = 0) {
+    let result = this.topNode
+    for (;;) {
+      let inner = result.enter(pos, side)
+      if (!inner) return result
+      result = inner
+    }
   }
 
   /// Iterate over the tree and its children, calling `enter` for any
@@ -576,6 +612,11 @@ export interface SyntaxNode {
   childAfter(pos: number): SyntaxNode | null
   /// The last child that ends at or before `pos`.
   childBefore(pos: number): SyntaxNode | null
+  /// Enter the child at the given position. If side is -1 the child
+  /// may end at that position, when 1 it may start there. This will
+  /// also enter [overlaid](#common.MountedTree.overlay)
+  /// [mounted](#common.NodeProp^mounted) trees.
+  enter(pos: number, side: -1 | 0 | 1): SyntaxNode | null
   /// This node's next sibling, if any.
   nextSibling: SyntaxNode | null
   /// This node's previous sibling.
@@ -609,7 +650,7 @@ export interface SyntaxNode {
 
 class TreeNode implements SyntaxNode {
   constructor(readonly node: Tree,
-              readonly from: number,
+              readonly _from: number,
               readonly index: number,
               readonly _parent: TreeNode | null) {}
 
@@ -617,12 +658,14 @@ class TreeNode implements SyntaxNode {
 
   get name() { return this.node.type.name }
 
-  get to() { return this.from + this.node.length }
+  get from() { return this._from }
+
+  get to() { return this._from + this.node.length }
 
   nextChild(i: number, dir: 1 | -1, after: number, full = false): TreeNode | BufferNode | null {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
-        let next = children[i], start = positions[i] + parent.from
+        let next = children[i], start = positions[i] + parent._from
         if (after != After.None && (dir < 0 ? start >= after : start + next.length <= after))
           continue
         if (next instanceof TreeBuffer) {
@@ -630,8 +673,8 @@ class TreeNode implements SyntaxNode {
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
         } else if (full || (!next.type.isAnonymous || hasChild(next))) {
           let mounted
-          if (next.props && (mounted = next.prop(NodeProp.mountedTree)))
-            return new TreeNode(mounted, start, i, parent)
+          if (next.props && (mounted = next.prop(NodeProp.mounted)) && !mounted.overlay)
+            return new TreeNode(mounted.tree, start, i, parent)
           let inner = new TreeNode(next, start, i, parent)
           return full || !inner.type.isAnonymous ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
         }
@@ -648,6 +691,18 @@ class TreeNode implements SyntaxNode {
 
   childAfter(pos: number) { return this.nextChild(0, 1, pos) }
   childBefore(pos: number) { return this.nextChild(this.node.children.length - 1, -1, pos) }
+
+  enter(pos: number, side: -1 | 0 | 1) {
+    let mounted = this.node.prop(NodeProp.mounted)
+    if (mounted && mounted.overlay) {
+      for (let {from, to} of mounted.overlay) {
+        if ((side > 0 ? from <= pos : from < pos) &&
+            (side < 0 ? to >= pos : to > pos))
+          return new TreeNode(mounted.tree, mounted.overlay[0].from + this.from, -1, this)
+      }
+    }
+    return enterChild(this, pos, side)
+  }
 
   nextSignificantParent() {
     let val: TreeNode = this
@@ -687,6 +742,12 @@ class TreeNode implements SyntaxNode {
 
   /// @internal
   toString() { return this.node.toString() }
+}
+
+function enterChild(node: SyntaxNode, pos: number, side: -1 | 0 | 1) {
+  let found = side < 0 ? node.childBefore(pos) : node.childAfter(pos)
+  return found && (side > 0 ? found.from <= pos : found.from < pos) &&
+    (side < 0 ? found.to >= pos : found.to > pos) ? found : null
 }
 
 function getChildren(node: SyntaxNode, type: string | number, before: string | number | null, after: string | number | null): SyntaxNode[] {
@@ -734,6 +795,8 @@ class BufferNode implements SyntaxNode {
 
   childAfter(pos: number) { return this.child(1, pos) }
   childBefore(pos: number) { return this.child(-1, pos) }
+
+  enter(pos: number, side: -1 | 0 | 1) { return enterChild(this, pos, side) }
 
   get parent() {
     return this._parent || this.context.parent.nextSignificantParent()
