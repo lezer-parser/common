@@ -526,13 +526,13 @@ class FlatBufferCursor implements BufferCursor {
 /// before children, with the endIndex of the parent indicating which
 /// children belong to it)
 export class TreeBuffer {
-  /// Create a tree buffer @internal
+  /// Create a tree buffer.
   constructor(
-    /// @internal
+    /// The buffer's content.
     readonly buffer: Uint16Array,
     /// The total length of the group of nodes in the buffer.
     readonly length: number,
-    /// @internal
+    /// The node set used in this buffer.
     readonly set: NodeSet
   ) {}
 

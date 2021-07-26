@@ -24,6 +24,9 @@ const enum Open { Start = 1, End = 2 }
 /// fragments for document changes.
 export class TreeFragment {
   /// @internal
+  open: Open
+
+  /// Construct a tree fragment.
   constructor(
     /// The start of the unchanged range pointed to by this fragment.
     /// This refers to an offset in the _updated_ document (as opposed
@@ -38,9 +41,11 @@ export class TreeFragment {
     /// document to tree positions, subtract it to go from tree to
     /// document positions.
     readonly offset: number,
-    /// @internal
-    readonly open: number
-  ) {}
+    openStart: boolean = false,
+    openEnd: boolean = false
+  ) {
+    this.open = (openStart ? Open.Start : 0) | (openEnd ? Open.End : 0)
+  }
 
   /// Whether the start of the fragment represents the start of a
   /// parse, or the end of a change. (In the second case, it may not
@@ -59,7 +64,7 @@ export class TreeFragment {
   /// fragment has [`openEnd`](#common.TreeFragment.openEnd) set to
   /// true.
   static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
-    let result = [new TreeFragment(0, tree.length, tree, 0, partial ? Open.End : 0)]
+    let result = [new TreeFragment(0, tree.length, tree, 0, false, partial)]
     for (let f of fragments) if (f.to > tree.length) result.push(f)
     return result
   }
@@ -78,9 +83,7 @@ export class TreeFragment {
         let cut: TreeFragment | null = nextF
         if (pos >= cut.from || nextPos <= cut.to || off) {
           let fFrom = Math.max(cut.from, pos) - off, fTo = Math.min(cut.to, nextPos) - off
-          cut = fFrom >= fTo ? null :
-            new TreeFragment(fFrom, fTo, cut.tree, cut.offset + off,
-                             (cI > 0 ? Open.Start : 0) | (nextC ? Open.End : 0))
+          cut = fFrom >= fTo ? null : new TreeFragment(fFrom, fTo, cut.tree, cut.offset + off, cI > 0, !!nextC)
         }
         if (cut) result.push(cut)
         if (nextF.to > nextPos) break
@@ -120,14 +123,6 @@ export interface PartialParse {
 
 /// A superclass that parsers should extend.
 export abstract class Parser {
-  /// Initialize a parser.
-  constructor(nodeSet: NodeSet) {
-    this.nodeSet = nodeSet
-  }
-
-  /// The nodes used in the root trees emitted by this parser.
-  nodeSet: NodeSet
-
   /// Start a parse for a single tree. This is the method concrete
   /// parser implementations must implement. Called by `startParse`,
   /// with the optional arguments resolved.
