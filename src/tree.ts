@@ -651,6 +651,7 @@ export interface SyntaxNode {
 class TreeNode implements SyntaxNode {
   constructor(readonly node: Tree,
               readonly _from: number,
+              // Index in parent node, set to -1 if the node is not a direct child of _parent.node (overlay)
               readonly index: number,
               readonly _parent: TreeNode | null) {}
 
@@ -680,7 +681,8 @@ class TreeNode implements SyntaxNode {
         }
       }
       if (full || !parent.type.isAnonymous) return null
-      i = parent.index + dir
+      if (parent.index >= 0) i = parent.index + dir
+      else i = dir < 0 ? -1 : parent._parent!.node.children.length
       parent = parent._parent!
       if (!parent) return null
     }
@@ -695,9 +697,10 @@ class TreeNode implements SyntaxNode {
   enter(pos: number, side: -1 | 0 | 1) {
     let mounted = this.node.prop(NodeProp.mounted)
     if (mounted && mounted.overlay) {
+      let rPos = pos - this.from
       for (let {from, to} of mounted.overlay) {
-        if ((side > 0 ? from <= pos : from < pos) &&
-            (side < 0 ? to >= pos : to > pos))
+        if ((side > 0 ? from <= rPos : from < rPos) &&
+            (side < 0 ? to >= rPos : to > rPos))
           return new TreeNode(mounted.tree, mounted.overlay[0].from + this.from, -1, this)
       }
     }
@@ -715,10 +718,10 @@ class TreeNode implements SyntaxNode {
   }
 
   get nextSibling() {
-    return this._parent ? this._parent.nextChild(this.index + 1, 1, -1) : null
+    return this._parent && this.index >= 0 ? this._parent.nextChild(this.index + 1, 1, -1) : null
   }
   get prevSibling() {
-    return this._parent ? this._parent.nextChild(this.index - 1, -1, -1) : null
+    return this._parent && this.index >= 0 ? this._parent.nextChild(this.index - 1, -1, -1) : null
   }
 
   get cursor() { return new TreeCursor(this) }
@@ -968,7 +971,7 @@ export class TreeCursor {
   sibling(dir: 1 | -1) {
     if (!this.buffer)
       return !this._tree._parent ? false
-        : this.yield(this._tree._parent.nextChild(this._tree.index + dir, dir, After.None, this.full))
+        : this.yield(this._tree.index < 0 ? null : this._tree._parent.nextChild(this._tree.index + dir, dir, After.None, this.full))
 
     let {buffer} = this.buffer, d = this.stack.length - 1
     if (dir < 0) {
@@ -1002,7 +1005,7 @@ export class TreeCursor {
       ({index, _parent: parent} = this._tree)
     }
     for (; parent; {index, _parent: parent} = parent) {
-      for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
+      if (index > -1) for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
         if (this.full || child instanceof TreeBuffer || !child.type.isAnonymous || hasChild(child)) return false
       }
@@ -1010,8 +1013,8 @@ export class TreeCursor {
     return true
   }
 
-  private move(dir: 1 | -1) {
-    if (this.enter(dir, After.None)) return true
+  private move(dir: 1 | -1, enter: boolean) {
+    if (enter && this.enter(dir, After.None)) return true
     for (;;) {
       if (this.sibling(dir)) return true
       if (this.atLastNode(dir) || !this.parent()) return false
@@ -1021,15 +1024,15 @@ export class TreeCursor {
   /// Move to the next node in a
   /// [pre-order](https://en.wikipedia.org/wiki/Tree_traversal#Pre-order_(NLR))
   /// traversal, going from a node to its first child or, if the
-  /// current node is empty, its next sibling or the next sibling of
-  /// the first parent node that has one.
-  next() { return this.move(1) }
+  /// current node is empty or `enter` is false, its next sibling or
+  /// the next sibling of the first parent node that has one.
+  next(enter = true) { return this.move(1, enter) }
 
   /// Move to the next node in a last-to-first pre-order traveral. A
   /// node is followed by its last child or, if it has none, its
   /// previous sibling or the previous sibling of the first parent
   /// node that has one.
-  prev() { return this.move(-1) }
+  prev(enter = true) { return this.move(-1, enter) }
 
   /// Move the cursor to the innermost node that covers `pos`. If
   /// `side` is -1, it will enter nodes that end at `pos`. If it is 1,
