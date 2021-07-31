@@ -344,7 +344,7 @@ export class Tree {
   /// cursors, doesn't skip through
   /// [anonymous](#common.NodeType.isAnonymous) nodes.
   fullCursor(): TreeCursor {
-    return new TreeCursor(this.topNode as TreeNode, true)
+    return new TreeCursor(this.topNode as TreeNode, Mode.Full)
   }
 
   /// Get a [syntax node](#common.SyntaxNode) object for the top of the
@@ -565,19 +565,10 @@ export class TreeBuffer {
   }
 
   /// @internal
-  findChild(startIndex: number, endIndex: number, dir: 1 | -1, after: number) {
+  findChild(startIndex: number, endIndex: number, dir: 1 | -1, pos: number, side: Side) {
     let {buffer} = this, pick = -1
     for (let i = startIndex; i != endIndex; i = buffer[i + 3]) {
-      if (after != After.None) {
-        let start = buffer[i + 1], end = buffer[i + 2]
-        if (dir > 0) {
-          if (end > after) pick = i
-          if (end > after) break
-        } else {
-          if (start < after) pick = i
-          if (end >= after) break
-        }
-      } else {
+      if (checkSide(side, pos, buffer[i + 1], buffer[i + 2])) {
         pick = i
         if (dir > 0) break
       }
@@ -585,8 +576,6 @@ export class TreeBuffer {
     return pick
   }
 }
-
-const enum After { None = -1e8 }
 
 /// A syntax node provides an immutable pointer to a given node in a
 /// tree. When iterating over large amounts of nodes, you may want to
@@ -608,15 +597,18 @@ export interface SyntaxNode {
   firstChild: SyntaxNode | null
   /// The node's last child, if available.
   lastChild: SyntaxNode | null
-  /// The first child that starts at or after `pos`.
+  /// The first child that ends after `pos`.
   childAfter(pos: number): SyntaxNode | null
-  /// The last child that ends at or before `pos`.
+  /// The last child that starts before `pos`.
   childBefore(pos: number): SyntaxNode | null
   /// Enter the child at the given position. If side is -1 the child
   /// may end at that position, when 1 it may start there. This will
   /// also enter [overlaid](#common.MountedTree.overlay)
-  /// [mounted](#common.NodeProp^mounted) trees.
-  enter(pos: number, side: -1 | 0 | 1): SyntaxNode | null
+  /// [mounted](#common.NodeProp^mounted) trees. When `enterBuffers`
+  /// is false this will not enter [buffers](#common.TreeBuffer), only
+  /// [nodes](#common.Tree) (which is mostly useful when looking for
+  /// props, which can't exist on buffer-allocated nodes).
+  enter(pos: number, side: -1 | 0 | 1, enterBuffers?: boolean): SyntaxNode | null
   /// This node's next sibling, if any.
   nextSibling: SyntaxNode | null
   /// This node's previous sibling.
@@ -648,6 +640,31 @@ export interface SyntaxNode {
   getChildren(type: string | number, before?: string | number | null, after?: string | number | null): SyntaxNode[]
 }
 
+const enum Side {
+  Before = -2,
+  AtOrBefore = -1,
+  Around = 0,
+  AtOrAfter = 1,
+  After = 2,
+  DontCare = 4
+}
+
+function checkSide(side: Side, pos: number, from: number, to: number) {
+  switch (side) {
+    case Side.Before: return from < pos
+    case Side.AtOrBefore: return to >= pos && (from < pos || from == pos && to == pos)
+    case Side.Around: return from < pos && to > pos
+    case Side.AtOrAfter: return from <= pos && (to > pos || from == pos && to == pos)
+    case Side.After: return to > pos
+    case Side.DontCare: return true
+  }
+}
+
+const enum Mode {
+  Full = 1,
+  NoEnterBuffer = 2,
+}
+
 class TreeNode implements SyntaxNode {
   constructor(readonly node: Tree,
               readonly _from: number,
@@ -663,24 +680,25 @@ class TreeNode implements SyntaxNode {
 
   get to() { return this._from + this.node.length }
 
-  nextChild(i: number, dir: 1 | -1, after: number, full = false): TreeNode | BufferNode | null {
+  nextChild(i: number, dir: 1 | -1, pos: number, side: Side, mode: Mode = 0): TreeNode | BufferNode | null {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent.node, e = dir > 0 ? children.length : -1; i != e; i += dir) {
         let next = children[i], start = positions[i] + parent._from
-        if (after != After.None && (dir < 0 ? start >= after : start + next.length <= after))
-          continue
+        if (!checkSide(side, pos, start, start + next.length)) continue
         if (next instanceof TreeBuffer) {
-          let index = next.findChild(0, next.buffer.length, dir, after == After.None ? After.None : after - start)
+          if (mode & Mode.NoEnterBuffer) continue
+          let index = next.findChild(0, next.buffer.length, dir, pos - start, side)
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
-        } else if (full || (!next.type.isAnonymous || hasChild(next))) {
+        } else if ((mode & Mode.Full) || (!next.type.isAnonymous || hasChild(next))) {
           let mounted
           if (next.props && (mounted = next.prop(NodeProp.mounted)) && !mounted.overlay)
             return new TreeNode(mounted.tree, start, i, parent)
           let inner = new TreeNode(next, start, i, parent)
-          return full || !inner.type.isAnonymous ? inner : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, after)
+          return (mode & Mode.Full) || !inner.type.isAnonymous ? inner
+            : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, pos, side)
         }
       }
-      if (full || !parent.type.isAnonymous) return null
+      if ((mode & Mode.Full) || !parent.type.isAnonymous) return null
       if (parent.index >= 0) i = parent.index + dir
       else i = dir < 0 ? -1 : parent._parent!.node.children.length
       parent = parent._parent!
@@ -688,23 +706,23 @@ class TreeNode implements SyntaxNode {
     }
   }
 
-  get firstChild() { return this.nextChild(0, 1, After.None) }
-  get lastChild() { return this.nextChild(this.node.children.length - 1, -1, After.None) }
+  get firstChild() { return this.nextChild(0, 1, 0, Side.DontCare) }
+  get lastChild() { return this.nextChild(this.node.children.length - 1, -1, 0, Side.DontCare) }
 
-  childAfter(pos: number) { return this.nextChild(0, 1, pos) }
-  childBefore(pos: number) { return this.nextChild(this.node.children.length - 1, -1, pos) }
+  childAfter(pos: number) { return this.nextChild(0, 1, pos, Side.After) }
+  childBefore(pos: number) { return this.nextChild(this.node.children.length - 1, -1, pos, Side.Before) }
 
-  enter(pos: number, side: -1 | 0 | 1) {
+  enter(pos: number, side: -1 | 0 | 1, enterBuffers = true) {
+    let rPos = pos - this.from
     let mounted = this.node.prop(NodeProp.mounted)
     if (mounted && mounted.overlay) {
-      let rPos = pos - this.from
       for (let {from, to} of mounted.overlay) {
         if ((side > 0 ? from <= rPos : from < rPos) &&
             (side < 0 ? to >= rPos : to > rPos))
           return new TreeNode(mounted.tree, mounted.overlay[0].from + this.from, -1, this)
       }
     }
-    return enterChild(this, pos, side)
+    return this.nextChild(0, 1, pos, side, enterBuffers ? 0 : Mode.NoEnterBuffer)
   }
 
   nextSignificantParent() {
@@ -718,10 +736,10 @@ class TreeNode implements SyntaxNode {
   }
 
   get nextSibling() {
-    return this._parent && this.index >= 0 ? this._parent.nextChild(this.index + 1, 1, -1) : null
+    return this._parent && this.index >= 0 ? this._parent.nextChild(this.index + 1, 1, 0, Side.DontCare) : null
   }
   get prevSibling() {
-    return this._parent && this.index >= 0 ? this._parent.nextChild(this.index - 1, -1, -1) : null
+    return this._parent && this.index >= 0 ? this._parent.nextChild(this.index - 1, -1, 0, Side.DontCare) : null
   }
 
   get cursor() { return new TreeCursor(this) }
@@ -745,12 +763,6 @@ class TreeNode implements SyntaxNode {
 
   /// @internal
   toString() { return this.node.toString() }
-}
-
-function enterChild(node: SyntaxNode, pos: number, side: -1 | 0 | 1) {
-  let found = side < 0 ? node.childBefore(pos) : node.childAfter(pos)
-  return found && (side > 0 ? found.from <= pos : found.from < pos) &&
-    (side < 0 ? found.to >= pos : found.to > pos) ? found : null
 }
 
 function getChildren(node: SyntaxNode, type: string | number, before: string | number | null, after: string | number | null): SyntaxNode[] {
@@ -786,27 +798,31 @@ class BufferNode implements SyntaxNode {
     this.type = context.buffer.set.types[context.buffer.buffer[index]]
   }
 
-  child(dir: 1 | -1, after: number): BufferNode | null {
+  child(dir: 1 | -1, pos: number, side: Side): BufferNode | null {
     let {buffer} = this.context
-    let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], dir,
-                                 after == After.None ? After.None : after - this.context.start)
+    let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], dir, pos - this.context.start, side)
     return index < 0 ? null : new BufferNode(this.context, this, index)
   }
 
-  get firstChild() { return this.child(1, After.None) }
-  get lastChild() { return this.child(-1, After.None) }
+  get firstChild() { return this.child(1, 0, Side.DontCare) }
+  get lastChild() { return this.child(-1, 0, Side.DontCare) }
 
-  childAfter(pos: number) { return this.child(1, pos) }
-  childBefore(pos: number) { return this.child(-1, pos) }
+  childAfter(pos: number) { return this.child(1, pos, Side.After) }
+  childBefore(pos: number) { return this.child(-1, pos, Side.Before) }
 
-  enter(pos: number, side: -1 | 0 | 1) { return enterChild(this, pos, side) }
+  enter(pos: number, side: -1 | 0 | 1, enterBuffer = true) {
+    if (!enterBuffer) return null
+    let {buffer} = this.context
+    let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], side > 0 ? 1 : -1, pos, side)
+    return index < 0 ? null : new BufferNode(this.context, this, index)
+  }
 
   get parent() {
     return this._parent || this.context.parent.nextSignificantParent()
   }
 
   externalSibling(dir: 1 | -1) {
-    return this._parent ? null : this.context.parent.nextChild(this.context.index + dir, dir, -1)
+    return this._parent ? null : this.context.parent.nextChild(this.context.index + dir, dir, 0, Side.DontCare)
   }
 
   get nextSibling(): SyntaxNode | null {
@@ -821,7 +837,7 @@ class BufferNode implements SyntaxNode {
     let {buffer} = this.context
     let parentStart = this._parent ? this._parent.index + 4 : 0
     if (this.index == parentStart) return this.externalSibling(-1)
-    return new BufferNode(this.context, this._parent, buffer.findChild(parentStart, this.index, -1, After.None))
+    return new BufferNode(this.context, this._parent, buffer.findChild(parentStart, this.index, -1, 0, Side.DontCare))
   }
 
   get cursor() { return new TreeCursor(this) }
@@ -887,7 +903,7 @@ export class TreeCursor {
   private bufferNode: BufferNode | null = null
 
   /// @internal
-  constructor(node: TreeNode | BufferNode, readonly full = false) {
+  constructor(node: TreeNode | BufferNode, readonly mode = 0) {
     if (node instanceof TreeNode) {
       this.yieldNode(node)
     } else {
@@ -933,13 +949,12 @@ export class TreeCursor {
   }
 
   /// @internal
-  enter(dir: 1 | -1, after: number) {
+  enterChild(dir: 1 | -1, pos: number, side: Side) {
     if (!this.buffer)
-      return this.yield(this._tree.nextChild(dir < 0 ? this._tree.node.children.length - 1 : 0, dir, after, this.full))
+      return this.yield(this._tree.nextChild(dir < 0 ? this._tree.node.children.length - 1 : 0, dir, pos, side, this.mode))
 
     let {buffer} = this.buffer
-    let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], dir,
-                                 after == After.None ? After.None : after - this.buffer.start)
+    let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], dir, pos - this.buffer.start, side)
     if (index < 0) return false
     this.stack.push(this.index)
     return this.yieldBuf(index)
@@ -947,22 +962,31 @@ export class TreeCursor {
 
   /// Move the cursor to this node's first child. When this returns
   /// false, the node has no child, and the cursor has not been moved.
-  firstChild() { return this.enter(1, After.None) }
+  firstChild() { return this.enterChild(1, 0, Side.DontCare) }
 
   /// Move the cursor to this node's last child.
-  lastChild() { return this.enter(-1, After.None) }
+  lastChild() { return this.enterChild(-1, 0, Side.DontCare) }
 
-  /// Move the cursor to the first child that starts at or after `pos`.
-  childAfter(pos: number) { return this.enter(1, pos) }
+  /// Move the cursor to the first child that ends after `pos`.
+  childAfter(pos: number) { return this.enterChild(1, pos, Side.After) }
 
-  /// Move to the last child that ends at or before `pos`.
-  childBefore(pos: number) { return this.enter(-1, pos) }
+  /// Move to the last child that starts before `pos`.
+  childBefore(pos: number) { return this.enterChild(-1, pos, Side.Before) }
+
+  /// Move the cursor to the child around `pos`. If side is -1 the child
+  /// may end at that position, when 1 it may start there. This will
+  /// also enter [overlaid](#common.MountedTree.overlay)
+  /// [mounted](#common.NodeProp^mounted) trees.
+  enter(pos: number, side: -1 | 0 | 1, enterBuffers: boolean = true) {
+    if (!this.buffer) return this.yield(this._tree.nextChild(0, 1, pos, side, this.mode | (enterBuffers ? 0 : Mode.NoEnterBuffer)))
+    return this.enterChild(1, pos, side)
+  }
 
   /// Move the node's parent node, if this isn't the top node.
   parent() {
-    if (!this.buffer) return this.yieldNode(this.full ? this._tree._parent : this._tree.parent)
+    if (!this.buffer) return this.yieldNode((this.mode & Mode.Full) ? this._tree._parent : this._tree.parent)
     if (this.stack.length) return this.yieldBuf(this.stack.pop()!)
-    let parent = this.full ? this.buffer.parent : this.buffer.parent.nextSignificantParent()
+    let parent = (this.mode & Mode.Full) ? this.buffer.parent : this.buffer.parent.nextSignificantParent()
     this.buffer = null
     return this.yieldNode(parent)
   }
@@ -971,19 +995,20 @@ export class TreeCursor {
   sibling(dir: 1 | -1) {
     if (!this.buffer)
       return !this._tree._parent ? false
-        : this.yield(this._tree.index < 0 ? null : this._tree._parent.nextChild(this._tree.index + dir, dir, After.None, this.full))
+        : this.yield(this._tree.index < 0 ? null
+        : this._tree._parent.nextChild(this._tree.index + dir, dir, 0, Side.DontCare, this.mode))
 
     let {buffer} = this.buffer, d = this.stack.length - 1
     if (dir < 0) {
       let parentStart = d < 0 ? 0 : this.stack[d] + 4
       if (this.index != parentStart)
-        return this.yieldBuf(buffer.findChild(parentStart, this.index, -1, After.None))
+        return this.yieldBuf(buffer.findChild(parentStart, this.index, -1, 0, Side.DontCare))
     } else {
       let after = buffer.buffer[this.index + 3]
       if (after < (d < 0 ? buffer.buffer.length : buffer.buffer[this.stack[d] + 3]))
         return this.yieldBuf(after)
     }
-    return d < 0 ? this.yield(this.buffer.parent.nextChild(this.buffer.index + dir, dir, After.None, this.full)) : false
+    return d < 0 ? this.yield(this.buffer.parent.nextChild(this.buffer.index + dir, dir, 0, Side.DontCare, this.mode)) : false
   }
 
   /// Move to this node's next sibling, if any.
@@ -1007,14 +1032,14 @@ export class TreeCursor {
     for (; parent; {index, _parent: parent} = parent) {
       if (index > -1) for (let i = index + dir, e = dir < 0 ? -1 : parent.node.children.length; i != e; i += dir) {
         let child = parent.node.children[i]
-        if (this.full || child instanceof TreeBuffer || !child.type.isAnonymous || hasChild(child)) return false
+        if ((this.mode & Mode.Full) || child instanceof TreeBuffer || !child.type.isAnonymous || hasChild(child)) return false
       }
     }
     return true
   }
 
   private move(dir: 1 | -1, enter: boolean) {
-    if (enter && this.enter(dir, After.None)) return true
+    if (enter && this.enterChild(dir, 0, Side.DontCare)) return true
     for (;;) {
       if (this.sibling(dir)) return true
       if (this.atLastNode(dir) || !this.parent()) return false
@@ -1045,15 +1070,7 @@ export class TreeCursor {
       if (!this.parent()) break
 
     // Then scan down into child nodes as far as possible
-    for (;;) {
-      if (side < 0 ? !this.childBefore(pos) : !this.childAfter(pos)) break
-      if (this.from == this.to ||
-          (side < 1 ? this.from >= pos : this.from > pos) ||
-          (side > -1 ? this.to <= pos : this.to < pos)) {
-        this.parent()
-        break
-      }
-    }
+    while (this.enterChild(1, pos, side)) {}
     return this
   }
 
