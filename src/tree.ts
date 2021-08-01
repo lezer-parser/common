@@ -67,7 +67,7 @@ export class NodeProp<T> {
   /// for the node types of closing delimiters that match it.
   static closedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
 
-  /// The inverse of [`openedBy`](#tree.NodeProp^closedBy). This is
+  /// The inverse of [`closedBy`](#tree.NodeProp^closedBy). This is
   /// attached to closing delimiters, holding an array of node names
   /// of types of matching opening delimiters.
   static openedBy = new NodeProp<readonly string[]>({deserialize: str => str.split(" ")})
