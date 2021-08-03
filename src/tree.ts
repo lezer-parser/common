@@ -1,5 +1,8 @@
 import {Parser} from "./parse"
 
+// FIXME profile adding a per-Tree TreeNode cache, validating it by
+// parent pointer
+
 /// The default maximum length of a `TreeBuffer` node (1024).
 export const DefaultBufferLength = 1024
 
@@ -652,9 +655,9 @@ const enum Side {
 function checkSide(side: Side, pos: number, from: number, to: number) {
   switch (side) {
     case Side.Before: return from < pos
-    case Side.AtOrBefore: return to >= pos && (from < pos || from == pos && to == pos)
+    case Side.AtOrBefore: return to >= pos && from < pos
     case Side.Around: return from < pos && to > pos
-    case Side.AtOrAfter: return from <= pos && (to > pos || from == pos && to == pos)
+    case Side.AtOrAfter: return from <= pos && to > pos
     case Side.After: return to > pos
     case Side.DontCare: return true
   }

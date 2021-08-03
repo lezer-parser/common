@@ -12,9 +12,8 @@ let nodeSet = new NodeSet(types)
 
 function id(n: string) { return types.find(x => x.name == n)!.id }
 
-function mk(spec: string, conf: {props?: {[pos: number]: [NodeProp<any>, any]}} = {}) {
+function mk(spec: string) {
   let starts: number[] = [], buffer: number[] = []
-  let props = conf.props || {}, propValues: any[] = []
   for (let pos = 0; pos < spec.length;) {
     let [m, letters, open, close] = /^(?:([abc])|([\[\(])|([\]\)]))/.exec(spec.slice(pos))!
     if (letters) {
@@ -28,14 +27,10 @@ function mk(spec: string, conf: {props?: {[pos: number]: [NodeProp<any>, any]}} 
     } else {
       let start = starts.pop()!, startOff = starts.pop()!
       buffer.push(id(close == ")" ? "Pa" : "Br"), start, pos + 1, (buffer.length + 4) - startOff)
-      if (props[start]) {
-        buffer.push(propValues.length, (props[start][0] as any).id, pos, -2)
-        propValues.push(props[start][1])
-      }
     }
     pos += m.length
   }
-  return Tree.build({buffer, nodeSet, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id, propValues})
+  return Tree.build({buffer, nodeSet, topID: 0, maxBufferLength: 10, minRepeatType: repeat.id})
 }
 
 let _recur: Tree | null = null
