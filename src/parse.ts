@@ -1,4 +1,4 @@
-import {Tree, NodeSet, Range} from "./tree"
+import {Tree, Range} from "./tree"
 
 /// The [`TreeFragment.applyChanges`](#common.TreeFragment^applyChanges)
 /// method expects changed ranges in this format.
@@ -187,3 +187,12 @@ class StringInput implements Input {
 
   read(from: number, to: number) { return this.string.slice(from, to) }
 }
+
+/// Parse wrapper functions are supported by some parsers to inject
+/// additional parsing logic.
+export type ParseWrapper = (
+  inner: PartialParse,
+  input: Input,
+  fragments: readonly TreeFragment[],
+  ranges: readonly {from: number, to: number}[]
+) => PartialParse

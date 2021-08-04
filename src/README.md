@@ -19,7 +19,7 @@ cheap to store.
 
 @TreeCursor
 
-### Node types
+#### Node types
 
 @NodeType
 
@@ -43,17 +43,11 @@ Buffers are an optimization in the way Lezer trees are stored.
 
 @Parser
 
-@ParseSpec
-
-@FullParseSpec
-
 @Input
 
 @PartialParse
 
-@InputGap
-
-@FramingParser
+@ParseWrapper
 
 ### Incremental Parsing
 
@@ -64,3 +58,9 @@ with some metadata that tells us which parts can be safely reused.
 @TreeFragment
 
 @ChangedRange
+
+### Mixed-Language Parsing
+
+@parseMixed
+
+@NestedParse
