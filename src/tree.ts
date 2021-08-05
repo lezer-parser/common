@@ -605,13 +605,18 @@ export interface SyntaxNode {
   /// The last child that starts before `pos`.
   childBefore(pos: number): SyntaxNode | null
   /// Enter the child at the given position. If side is -1 the child
-  /// may end at that position, when 1 it may start there. This will
-  /// also enter [overlaid](#common.MountedTree.overlay)
-  /// [mounted](#common.NodeProp^mounted) trees. When `enterBuffers`
-  /// is false this will not enter [buffers](#common.TreeBuffer), only
-  /// [nodes](#common.Tree) (which is mostly useful when looking for
-  /// props, which can't exist on buffer-allocated nodes).
-  enter(pos: number, side: -1 | 0 | 1, enterBuffers?: boolean): SyntaxNode | null
+  /// may end at that position, when 1 it may start there.
+  ///
+  /// This will by default enter
+  /// [overlaid](#common.MountedTree.overlay)
+  /// [mounted](#common.NodeProp^mounted) trees. You can set
+  /// `overlays` to false to disable that.
+  ///
+  /// Similarly, when `buffers` is false this will not enter
+  /// [buffers](#common.TreeBuffer), only [nodes](#common.Tree) (which
+  /// is mostly useful when looking for props, which cannot exist on
+  /// buffer-allocated nodes).
+  enter(pos: number, side: -1 | 0 | 1, overlays?: boolean, buffers?: boolean): SyntaxNode | null
   /// This node's next sibling, if any.
   nextSibling: SyntaxNode | null
   /// This node's previous sibling.
@@ -715,17 +720,17 @@ class TreeNode implements SyntaxNode {
   childAfter(pos: number) { return this.nextChild(0, 1, pos, Side.After) }
   childBefore(pos: number) { return this.nextChild(this.node.children.length - 1, -1, pos, Side.Before) }
 
-  enter(pos: number, side: -1 | 0 | 1, enterBuffers = true) {
-    let rPos = pos - this.from
-    let mounted = this.node.prop(NodeProp.mounted)
-    if (mounted && mounted.overlay) {
+  enter(pos: number, side: -1 | 0 | 1, overlays = true, buffers = true) {
+    let mounted
+    if (overlays && (mounted = this.node.prop(NodeProp.mounted)) && mounted.overlay) {
+      let rPos = pos - this.from
       for (let {from, to} of mounted.overlay) {
         if ((side > 0 ? from <= rPos : from < rPos) &&
             (side < 0 ? to >= rPos : to > rPos))
           return new TreeNode(mounted.tree, mounted.overlay[0].from + this.from, -1, this)
       }
     }
-    return this.nextChild(0, 1, pos, side, enterBuffers ? 0 : Mode.NoEnterBuffer)
+    return this.nextChild(0, 1, pos, side, buffers ? 0 : Mode.NoEnterBuffer)
   }
 
   nextSignificantParent() {
@@ -813,8 +818,8 @@ class BufferNode implements SyntaxNode {
   childAfter(pos: number) { return this.child(1, pos, Side.After) }
   childBefore(pos: number) { return this.child(-1, pos, Side.Before) }
 
-  enter(pos: number, side: -1 | 0 | 1, enterBuffer = true) {
-    if (!enterBuffer) return null
+  enter(pos: number, side: -1 | 0 | 1, overlays?: boolean, buffers = true) {
+    if (!buffers) return null
     let {buffer} = this.context
     let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], side > 0 ? 1 : -1, pos, side)
     return index < 0 ? null : new BufferNode(this.context, this, index)
@@ -976,13 +981,14 @@ export class TreeCursor {
   /// Move to the last child that starts before `pos`.
   childBefore(pos: number) { return this.enterChild(-1, pos, Side.Before) }
 
-  /// Move the cursor to the child around `pos`. If side is -1 the child
-  /// may end at that position, when 1 it may start there. This will
-  /// also enter [overlaid](#common.MountedTree.overlay)
-  /// [mounted](#common.NodeProp^mounted) trees.
-  enter(pos: number, side: -1 | 0 | 1, enterBuffers: boolean = true) {
-    if (!this.buffer) return this.yield(this._tree.nextChild(0, 1, pos, side, this.mode | (enterBuffers ? 0 : Mode.NoEnterBuffer)))
-    return this.enterChild(1, pos, side)
+  /// Move the cursor to the child around `pos`. If side is -1 the
+  /// child may end at that position, when 1 it may start there. This
+  /// will also enter [overlaid](#common.MountedTree.overlay)
+  /// [mounted](#common.NodeProp^mounted) trees unless `overlays` is
+  /// set to false.
+  enter(pos: number, side: -1 | 0 | 1, overlays = true, buffers = true) {
+    if (!this.buffer) return this.yield(this._tree.enter(pos, side, overlays, buffers))
+    return buffers ? this.enterChild(1, pos, side) : false
   }
 
   /// Move the node's parent node, if this isn't the top node.
