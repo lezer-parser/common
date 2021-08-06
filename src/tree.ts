@@ -366,7 +366,7 @@ export class Tree {
   }
 
   /// Like [`resolve`](#common.Tree.resolve), but will enter
-  /// [overlaid](#MountedTree.overlay) nodes, producing a syntax node
+  /// [overlaid](#common.MountedTree.overlay) nodes, producing a syntax node
   /// pointing into the innermost overlaid tree at the given position
   /// (with parent links going through all parent structure, including
   /// the host trees).

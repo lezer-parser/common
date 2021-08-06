@@ -64,3 +64,5 @@ with some metadata that tells us which parts can be safely reused.
 @parseMixed
 
 @NestedParse
+
+@MountedTree

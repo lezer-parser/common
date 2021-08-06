@@ -16,12 +16,12 @@ export interface ChangedRange {
 const enum Open { Start = 1, End = 2 }
 
 /// Tree fragments are used during [incremental
-/// parsing](#common.ParseSpec.fragments) to track parts of old
-/// trees that can be reused in a new parse. An array of fragments is
-/// used to track regions of an old tree whose nodes might be reused
-/// in new parses. Use the static
-/// [`applyChanges`](#common.TreeFragment^applyChanges) method to update
-/// fragments for document changes.
+/// parsing](#common.Parser.startParse) to track parts of old trees
+/// that can be reused in a new parse. An array of fragments is used
+/// to track regions of an old tree whose nodes might be reused in new
+/// parses. Use the static
+/// [`applyChanges`](#common.TreeFragment^applyChanges) method to
+/// update fragments for document changes.
 export class TreeFragment {
   /// @internal
   open: Open
@@ -126,12 +126,20 @@ export abstract class Parser {
   /// Start a parse for a single tree. This is the method concrete
   /// parser implementations must implement. Called by `startParse`,
   /// with the optional arguments resolved.
-  abstract startParseInner(
+  abstract createParse(
     input: Input,
     fragments: readonly TreeFragment[],
     ranges: readonly {from: number, to: number}[]
   ): PartialParse
 
+  /// Start a parse, returning a [partial parse](#common.PartialParse)
+  /// object. [`fragments`](#common.TreeFragment) can be passed in to
+  /// make the parse incremental.
+  ///
+  /// By default, the entire input is parsed. You can pass `ranges`,
+  /// which should be a sorted array of non-empty, non-overlapping
+  /// ranges, to parse only those ranges. The tree returned in that
+  /// case will start at `ranges[0].from`.
   startParse(
     input: Input | string,
     fragments?: readonly TreeFragment[],
@@ -139,7 +147,7 @@ export abstract class Parser {
   ): PartialParse {
     if (typeof input == "string") input = new StringInput(input)
     ranges = ranges && ranges.length ? ranges.map(r => new Range(r.from, r.to)) : [new Range(0, input.length)]
-    return this.startParseInner(input, fragments || [], ranges)
+    return this.createParse(input, fragments || [], ranges)
   }
 
   /// Run a full parse, returning the resulting tree.
