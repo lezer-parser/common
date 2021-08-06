@@ -319,7 +319,6 @@ class FragmentCursor {
     return false
   }
 
-  // FIXME this is possibly not reliable when the start of the old node was overwritten
   findMounts(parser: Parser) {
     let result: ReusableMount[] = []
     if (this.inner) for (let i = this.inner.trees.length - 1; i >= 0; i--) {

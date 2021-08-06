@@ -479,8 +479,6 @@ type BuildData = {
   /// An optional array holding reused nodes that the buffer can refer
   /// to.
   reused?: readonly Tree[],
-  /// An optional array holding node prop values to use in the buffer.
-  propValues?: readonly any[],
   /// The first node type that indicates repeat constructs in this
   /// grammar.
   minRepeatType?: number
@@ -1120,7 +1118,6 @@ const enum Balance { BranchFactor = 8 }
 
 const enum SpecialRecord {
   Reuse = -1,
-  Prop = -2,
   ContextChange = -3,
   LookAhead = -4
 }
@@ -1128,8 +1125,8 @@ const enum SpecialRecord {
 function buildTree(data: BuildData) {
   let {buffer, nodeSet,
        maxBufferLength = DefaultBufferLength,
-       reused = [], propValues = [],
-       minRepeatType = nodeSet.types.length} = data as BuildData
+       reused = [],
+       minRepeatType = nodeSet.types.length} = data
   let cursor = Array.isArray(buffer) ? new FlatBufferCursor(buffer, buffer.length) : buffer as BufferCursor
   let types = nodeSet.types
 
@@ -1138,20 +1135,18 @@ function buildTree(data: BuildData) {
   function takeNode(parentStart: number, minPos: number,
                     children: (Tree | TreeBuffer)[], positions: number[],
                     inRepeat: number) {
-    let {id, start, end, size} = cursor, props: undefined | [number, any][]
+    let {id, start, end, size} = cursor
     let lookAheadAtStart = lookAhead
     while (size < 0) {
       cursor.next()
       if (size == SpecialRecord.Reuse) {
         let node = reused[id]
-        children.push(props ? new Tree(node.type, node.children, node.positions, node.length, node.propValues.concat(props)) : node)
+        children.push(node)
         positions.push(start - parentStart)
         return
       } else if (size == SpecialRecord.ContextChange) { // Context change
         contextHash = id
         return
-      } else if (size == SpecialRecord.Prop) {
-        ;(props || (props = [])).push([start, propValues[id]])
       } else if (size == SpecialRecord.LookAhead) {
         lookAhead = id
         return
@@ -1163,8 +1158,8 @@ function buildTree(data: BuildData) {
 
     let type = types[id], node, buffer: {size: number, start: number, skip: number} | undefined
     let startPos = start - parentStart
-    if (!props && end - start <= maxBufferLength && (buffer = findBufferSize(cursor.pos - minPos, inRepeat))) {
-      // Small enough for a buffer, and no reused nodes or nodes with props inside
+    if (end - start <= maxBufferLength && (buffer = findBufferSize(cursor.pos - minPos, inRepeat))) {
+      // Small enough for a buffer, and no reused nodes inside
       let data = new Uint16Array(buffer.size - buffer.skip)
       let endPos = cursor.pos - buffer.size, index = data.length
       while (cursor.pos > endPos)
@@ -1197,7 +1192,7 @@ function buildTree(data: BuildData) {
         let make = makeBalanced(type)
         node = balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, end - start, make, make)
       } else {
-        node = makeTree(type, localChildren, localPositions, end - start, lookAheadAtStart - end, props)
+        node = makeTree(type, localChildren, localPositions, end - start, lookAheadAtStart - end)
       }
     }
 
