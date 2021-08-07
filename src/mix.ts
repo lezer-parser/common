@@ -132,6 +132,7 @@ class MixedParse implements PartialParse {
         enter = false
       } else if (!cursor.type.isAnonymous && cursor.from < cursor.to && (nest = this.nest(cursor, this.input))) {
         if (!cursor.tree) materialize(cursor)
+
         let oldMounts = fragmentCursor.findMounts(nest.parser)
         if (typeof nest.overlay == "function") {
           overlay = new ActiveOverlay(nest.parser, nest.overlay, oldMounts, this.inner.length,
@@ -176,16 +177,9 @@ class MixedParse implements PartialParse {
 // TreeBuffer.
 function sliceBuf(buf: TreeBuffer, startI: number, endI: number, nodes: (Tree | TreeBuffer)[], positions: number[], off: number) {
   if (startI < endI) {
-    let b = buf.buffer, from = b[startI + 1], to = b[endI - 2]
-    let copy = new Uint16Array(endI - startI)
-    for (let i = startI, j = 0; i < endI;) {
-      copy[j++] = b[i++]
-      copy[j++] = b[i++] - from
-      copy[j++] = b[i++] - from
-      copy[j++] = b[i++] - startI
-    }
-    nodes.push(new TreeBuffer(copy, to - from, buf.set))
-    positions.push(b[startI + 1] - off)
+    let from = buf.buffer[startI + 1], to = buf.buffer[endI - 2]
+    nodes.push(buf.slice(startI, endI, from, to))
+    positions.push(from - off)
   }
 }
 

@@ -576,6 +576,19 @@ export class TreeBuffer {
     }
     return pick
   }
+
+  /// @internal
+  slice(startI: number, endI: number, from: number, to: number) {
+    let b = this.buffer
+    let copy = new Uint16Array(endI - startI)
+    for (let i = startI, j = 0; i < endI;) {
+      copy[j++] = b[i++]
+      copy[j++] = b[i++] - from
+      copy[j++] = b[i++] - from
+      copy[j++] = b[i++] - startI
+    }
+    return new TreeBuffer(copy, to - from, this.set)
+  }
 }
 
 /// A syntax node provides an immutable pointer to a given node in a
@@ -855,15 +868,8 @@ class BufferNode implements SyntaxNode {
     let {buffer} = this.context
     let startI = this.index + 4, endI = buffer.buffer[this.index + 3]
     if (endI > startI) {
-      let start = this.from
-      let copy = new Uint16Array(endI - startI)
-      for (let i = startI, j = 0; i < endI;) {
-        copy[j++] = buffer.buffer[i++]
-        copy[j++] = buffer.buffer[i++] - start
-        copy[j++] = buffer.buffer[i++] - start
-        copy[j++] = buffer.buffer[i++] - startI
-      }
-      children.push(new TreeBuffer(copy, buffer.length, buffer.set))
+      let from = buffer.buffer[this.index + 1], to = buffer.buffer[this.index + 2]
+      children.push(buffer.slice(startI, endI, from, to))
       positions.push(0)
     }
     return new Tree(this.type, children, positions, this.to - this.from)
