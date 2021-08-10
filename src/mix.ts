@@ -1,4 +1,4 @@
-import {Tree, TreeBuffer, NodeType, NodeProp, TreeCursor, MountedTree} from "./tree"
+import {Tree, TreeBuffer, NodeType, SyntaxNode, NodeProp, TreeCursor, MountedTree} from "./tree"
 import {Input, Parser, PartialParse, TreeFragment, ParseWrapper} from "./parse"
 
 /// Objects returned by the function passed to
@@ -122,7 +122,7 @@ class MixedParse implements PartialParse {
     scan: for (let cursor = this.baseTree!.fullCursor(), nest, overlay: ActiveOverlay | null = null;;) {
       let enter = true, range
       if (fragmentCursor.hasNode(cursor)) {
-        if (overlay) {
+         if (overlay) {
           let match = overlay.mounts.find(m => m.frag.from <= cursor.from && m.frag.to >= cursor.to && m.mount.overlay)
           if (match) for (let r of match.mount.overlay!) {
             let from = r.from + match.pos, to = r.to + match.pos
@@ -133,7 +133,7 @@ class MixedParse implements PartialParse {
       } else if (!cursor.type.isAnonymous && cursor.from < cursor.to && (nest = this.nest(cursor, this.input))) {
         if (!cursor.tree) materialize(cursor)
 
-        let oldMounts = fragmentCursor.findMounts(nest.parser)
+        let oldMounts = fragmentCursor.findMounts(cursor.from, nest.parser)
         if (typeof nest.overlay == "function") {
           overlay = new ActiveOverlay(nest.parser, nest.overlay, oldMounts, this.inner.length,
                                       cursor.from, cursor.tree!,  overlay)
@@ -220,59 +220,35 @@ function materialize(cursor: TreeCursor) {
 }
 
 class StructureCursor {
-  trees: Tree[] = []
-  start: number[] = []
-  index: number[] = []
-  nextStart: number
+  cursor: TreeCursor
+  done = false
 
   constructor(
     root: Tree,
-    start = 0,
-    readonly from = start,
-    readonly to = start + root.length
+    private offset: number
   ) {
-    this.trees.push(root)
-    this.start.push(start)
-    this.index.push(0)
-    this.nextStart = Math.max(start, from)
+    this.cursor = root.fullCursor()
   }
 
-  // `pos` must be >= any previously given `pos` for this cursor
-  nextNodeAt(pos: number) {
-    if (pos < this.nextStart) return null
-    for (;;) {
-      let last = this.trees.length - 1
-      if (last < 0) {
-        this.nextStart = 1e9
-        return null
-      }
-      let top = this.trees[last], index = this.index[last]
-      if (index == top.children.length) {
-        this.trees.pop()
-        this.start.pop()
-        this.index.pop()
-        continue
-      }
-      let next = top.children[index]
-      let start = this.start[last] + top.positions[index]
-      if (start > pos) {
-        this.nextStart = start
-        return null
-      }
-      if (next instanceof Tree) {
-        this.index[last]++
-        let end = start + next.length
-        if (end >= Math.max(this.from, pos)) { // Enter this node
-          this.trees.push(next)
-          this.start.push(start)
-          this.index.push(0)
-          if (start == pos && end <= this.to) return next
-        }
-      } else {
-        this.index[last]++
-        this.nextStart = start + next.length
+  // Move to the first node (in pre-order) that starts at or after `pos`.
+  moveTo(pos: number) {
+    let {cursor} = this, p = pos - this.offset
+    while (!this.done && cursor.from < p) {
+      if (cursor.to >= pos && cursor.enter(p, 1, false, false)) {}
+      else if (!cursor.next(false)) this.done = true
+    }
+  }
+
+  hasNode(cursor: TreeCursor) {
+    this.moveTo(cursor.from)
+    if (!this.done && this.cursor.from + this.offset == cursor.from) {
+      for (let tree = this.cursor.tree!;;) {
+        if (tree == cursor.tree) return true
+        if (tree.children.length && tree.positions[0] == 0 && tree.children[0] instanceof Tree) tree = tree.children[0]
+        else break
       }
     }
+    return false
   }
 }
 
@@ -284,16 +260,15 @@ class FragmentCursor {
   constructor(readonly fragments: readonly TreeFragment[]) {
     if (fragments.length) {
       let first = this.curFrag = fragments[0]
-      this.inner = new StructureCursor(first.tree, -first.offset, first.from, first.to)
+      this.inner = new StructureCursor(first.tree, -first.offset)
     } else {
       this.curFrag = this.inner = null
     }
   }
 
-  nextNodeAt(pos: number) {
-    while (this.curFrag && pos >= this.curFrag.to) this.nextFrag()
-    if (!this.inner) return null
-    return this.inner.nextNodeAt(pos)
+  hasNode(node: TreeCursor) {
+    while (this.curFrag && node.from >= this.curFrag.to) this.nextFrag()
+    return this.curFrag && this.curFrag.from <= node.from && this.curFrag.to >= node.to && this.inner!.hasNode(node)
   }
 
   nextFrag() {
@@ -302,28 +277,26 @@ class FragmentCursor {
       this.curFrag = this.inner = null
     } else {
       let frag = this.curFrag = this.fragments[this.fragI]
-      this.inner = new StructureCursor(frag.tree, -frag.offset, frag.from, frag.to)
+      this.inner = new StructureCursor(frag.tree, -frag.offset)
     }
   }
 
-  hasNode(cursor: TreeCursor) {
-    let tree = cursor.tree
-    if (tree) for (let nodeHere; nodeHere = this.nextNodeAt(cursor.from);)
-      if (nodeHere == tree) return true
-    return false
-  }
-
-  findMounts(parser: Parser) {
+  findMounts(pos: number, parser: Parser) {
     let result: ReusableMount[] = []
-    if (this.inner) for (let i = this.inner.trees.length - 1; i >= 0; i--) {
-      let tree = this.inner.trees[i], mount = tree.prop(NodeProp.mounted)
-      if (mount && mount.parser == parser) {
-        let from = this.inner.start[i], to = from + tree.length
-        for (let i = this.fragI; i < this.fragments.length; i++) {
-          let frag = this.fragments[i]
-          if (frag.from >= to) break
-          let pos = from + this.curFrag!.offset - frag.offset
-          if (frag.tree == this.curFrag!.tree) result.push({frag, pos, mount})
+    if (this.inner) {
+      this.inner.cursor.moveTo(pos, 1)
+      for (let pos: SyntaxNode | null = this.inner.cursor.node; pos; pos = pos.parent) {
+        let mount = pos.tree!.prop(NodeProp.mounted)
+        if (mount && mount.parser == parser) {
+          for (let i = this.fragI; i < this.fragments.length; i++) {
+            let frag = this.fragments[i]
+            if (frag.from >= pos.to) break
+            if (frag.tree == this.curFrag!.tree) result.push({
+              frag,
+              pos: pos.from - frag.offset,
+              mount
+            })
+          }
         }
       }
     }
