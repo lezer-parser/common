@@ -915,7 +915,11 @@ export class TreeCursor {
   private bufferNode: BufferNode | null = null
 
   /// @internal
-  constructor(node: TreeNode | BufferNode, readonly mode = 0) {
+  constructor(
+    node: TreeNode | BufferNode,
+    /// @internal
+    readonly mode = 0
+  ) {
     if (node instanceof TreeNode) {
       this.yieldNode(node)
     } else {
