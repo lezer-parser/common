@@ -1,4 +1,4 @@
-import {Tree, TreeBuffer, NodeType, SyntaxNode, NodeProp, TreeCursor, MountedTree} from "./tree"
+import {Tree, TreeBuffer, NodeType, SyntaxNode, NodeProp, TreeCursor, MountedTree, Range} from "./tree"
 import {Input, Parser, PartialParse, TreeFragment, ParseWrapper} from "./parse"
 
 /// Objects returned by the function passed to
@@ -138,17 +138,17 @@ class MixedParse implements PartialParse {
           overlay = new ActiveOverlay(nest.parser, nest.overlay, oldMounts, this.inner.length,
                                       cursor.from, cursor.tree!,  overlay)
         } else {
-          let ranges = punchRanges(this.ranges, nest.overlay || [{from: cursor.from, to: cursor.to}])
+          let ranges = punchRanges(this.ranges, nest.overlay || [new Range(cursor.from, cursor.to)])
           this.inner.push(new InnerParse(
             nest.parser,
             nest.parser.startParse(this.input, enterFragments(oldMounts, ranges), ranges),
-            nest.overlay ? nest.overlay.map(r => ({from: r.from - cursor.from, to: r.to - cursor.from})) : null,
+            nest.overlay ? nest.overlay.map(r => new Range(r.from - cursor.from, r.to - cursor.from)) : null,
             cursor.tree!
           ))
           enter = false
         }
       } else if (overlay && (range = overlay.predicate(cursor))) {
-        if (range === true) range = {from: cursor.from, to: cursor.to}
+        if (range === true) range = new Range(cursor.from, cursor.to)
         if (range.from < range.to) overlay.ranges.push(range)
       }
       if (enter && cursor.firstChild()) {
@@ -162,7 +162,7 @@ class MixedParse implements PartialParse {
             this.inner.splice(overlay.index, 0, new InnerParse(
               overlay.parser,
               overlay.parser.startParse(this.input, enterFragments(overlay.mounts, ranges), ranges),
-              overlay.ranges.map(r => ({from: r.from - overlay!.start, to: r.to - overlay!.start})),
+              overlay.ranges.map(r => new Range(r.from - overlay!.start, r.to - overlay!.start)),
               overlay.target
             ))
             overlay = overlay.prev
@@ -314,10 +314,10 @@ function punchRanges(outer: readonly {from: number, to: number}[], ranges: reado
       if (r.to <= gapFrom) continue
       if (!copy) current = copy = ranges.slice()
       if (r.from < gapFrom) {
-        copy[j] = {from: r.from, to: gapFrom}
-        if (r.to > gapTo) copy.splice(j + 1, 0, {from: gapTo, to: r.to})
+        copy[j] = new Range(r.from, gapFrom)
+        if (r.to > gapTo) copy.splice(j + 1, 0, new Range(gapTo, r.to))
       } else if (r.to > gapTo) {
-        copy[j--] = {from: gapTo, to: r.to}
+        copy[j--] = new Range(gapTo, r.to)
       } else {
         copy.splice(j--, 1)
       }
@@ -342,7 +342,7 @@ function findCoverChanges(a: readonly {from: number, to: number}[],
     let nextB = iB == b.length ? 1e9 : inB ? b[iB].to : b[iB].from
     if (inA != inB) {
       let start = Math.max(pos, from), end = Math.min(nextA, nextB, to)
-      if (start < end) result.push({from: start, to: end})
+      if (start < end) result.push(new Range(start, end))
     }
     pos = Math.min(nextA, nextB)
     if (pos == 1e9) break
@@ -367,7 +367,7 @@ function enterFragments(mounts: readonly ReusableMount[], ranges: readonly {from
     let startPos = pos + (mount.overlay ? mount.overlay[0].from : 0), endPos = startPos + mount.tree.length
     let from = Math.max(frag.from, startPos), to = Math.min(frag.to, endPos)
     if (mount.overlay) {
-      let overlay = mount.overlay.map(r => ({from: r.from + pos, to: r.to + pos}))
+      let overlay = mount.overlay.map(r => new Range(r.from + pos, r.to + pos))
       let changes = findCoverChanges(ranges, overlay, from, to)
       for (let i = 0, pos = from;; i++) {
         let last = i == changes.length, end = last ? to : changes[i].from
