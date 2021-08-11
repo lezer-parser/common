@@ -1,3 +1,57 @@
+## 0.15.0 (2021-08-11)
+
+### Breaking changes
+
+The module name has changed from `lezer-tree` to `@lezer/common`.
+
+`TreeBuffer`s no longer accept a node type.
+
+`Tree.balance` no longer takes a buffer size as argument.
+
+`NodeProp.string`, `NodeProp.number`, and `NodeProp.flag` have been removed (the thing they provided is trivial to write by hand).
+
+A node's context hash is now stored in the `NodeProp.contextHash` prop.
+
+Reused nodes passed to `Tree.build` must now be `Tree` instances (not tree buffers).
+
+`Parser` is now an abstract class that all parser implementations must extend, implementing the `createParse` method.
+
+The `PartialParse` interface changed to make multi-pass parsers possible.
+
+`Parser.startParse` now takes different arguments `(input, fragments, ranges)` instead of `(input, startPos, context)`.
+
+The `Input` interface has changed (to become chunk-based and more low-level). A single `Input` object is now shared between outer and inner parses.
+
+`stringInput` is no longer exported (`Parser` methods will automatically wrap strings when appropriate).
+
+### Bug fixes
+
+Fix a bug in `TreeFragment.applyChanges` that prevented some valid reuse of syntax nodes.
+
+Fix a bug where reused nodes could incorrectly be dropped by `Tree.build`.
+
+### New features
+
+Node props can now be per-node, in which case they are stored on `Tree` instances rather than `NodeType`s.
+
+Tree nodes can now be replaced with other trees through `NodeProp.mountedTree`.
+
+`Tree.resolveInner` can now be used to resolve into overlay trees.
+
+`SyntaxNode` objects now have a `toTree` method to convert them to a stand-alone tree.
+
+`Tree.balance` now accepts a helper function to create the inner nodes.
+
+Tree cursors' `next`/`prev` methods now take an `enter` argument to control whether they enter the current node.
+
+`SyntaxNode` and `TreeCursor` now have an `enter` method to directly enter the child at the given position (if any).
+
+`Tree.iterate` callbacks now get an extra argument that allows them to create a `SyntaxNode` for the current node.
+
+The parsing interface now supports parsing specific, non-contiguous ranges of the input in a single parse.
+
+The module now exports a `parseMixed` helper function for creating mixed-language parsers.
+
 ## 0.13.2 (2021-02-17)
 
 ### New features
