@@ -146,7 +146,7 @@ export abstract class Parser {
     ranges?: readonly {from: number, to: number}[]
   ): PartialParse {
     if (typeof input == "string") input = new StringInput(input)
-    ranges = ranges && ranges.length ? ranges.map(r => new Range(r.from, r.to)) : [new Range(0, input.length)]
+    ranges = !ranges ? [new Range(0, input.length)] : ranges.length ? ranges.map(r => new Range(r.from, r.to)) : [new Range(0, 0)]
     return this.createParse(input, fragments || [], ranges)
   }
 

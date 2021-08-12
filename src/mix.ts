@@ -139,7 +139,7 @@ class MixedParse implements PartialParse {
                                       cursor.from, cursor.tree!,  overlay)
         } else {
           let ranges = punchRanges(this.ranges, nest.overlay || [new Range(cursor.from, cursor.to)])
-          this.inner.push(new InnerParse(
+          if (ranges.length) this.inner.push(new InnerParse(
             nest.parser,
             nest.parser.startParse(this.input, enterFragments(oldMounts, ranges), ranges),
             nest.overlay ? nest.overlay.map(r => new Range(r.from - cursor.from, r.to - cursor.from)) : null,
@@ -159,7 +159,7 @@ class MixedParse implements PartialParse {
           if (!cursor.parent()) break scan
           if (overlay && !--overlay.depth) {
             let ranges = punchRanges(this.ranges, overlay.ranges)
-            this.inner.splice(overlay.index, 0, new InnerParse(
+            if (ranges.length) this.inner.splice(overlay.index, 0, new InnerParse(
               overlay.parser,
               overlay.parser.startParse(this.input, enterFragments(overlay.mounts, ranges), ranges),
               overlay.ranges.map(r => new Range(r.from - overlay!.start, r.to - overlay!.start)),
