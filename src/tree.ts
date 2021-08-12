@@ -832,7 +832,7 @@ class BufferNode implements SyntaxNode {
   enter(pos: number, side: -1 | 0 | 1, overlays?: boolean, buffers = true) {
     if (!buffers) return null
     let {buffer} = this.context
-    let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], side > 0 ? 1 : -1, pos, side)
+    let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], side > 0 ? 1 : -1, pos - this.context.start, side)
     return index < 0 ? null : new BufferNode(this.context, this, index)
   }
 
