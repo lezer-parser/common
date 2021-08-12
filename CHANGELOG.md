@@ -1,3 +1,9 @@
+## 0.15.2 (2021-08-12)
+
+### Bug fixes
+
+Fix a bug that would cause `enter` to return incorrect results when called entering children in a buffer with .
+
 ## 0.15.1 (2021-08-12)
 
 ### Bug fixes
