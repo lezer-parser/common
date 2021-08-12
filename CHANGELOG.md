@@ -1,3 +1,9 @@
+## 0.15.1 (2021-08-12)
+
+### Bug fixes
+
+Fix a bug where `parseMixed` could crash by dereferencing null.
+
 ## 0.15.0 (2021-08-11)
 
 ### Breaking changes
