@@ -1,3 +1,9 @@
+## 0.15.3 (2021-08-12)
+
+### Bug fixes
+
+Fix an issue where `parseMixed` could create overlay mounts with zero ranges, which were useless and confused CodeMirror's highlighter.
+
 ## 0.15.2 (2021-08-12)
 
 ### Bug fixes
