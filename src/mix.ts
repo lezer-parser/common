@@ -286,7 +286,7 @@ class FragmentCursor {
     if (this.inner) {
       this.inner.cursor.moveTo(pos, 1)
       for (let pos: SyntaxNode | null = this.inner.cursor.node; pos; pos = pos.parent) {
-        let mount = pos.tree!.prop(NodeProp.mounted)
+        let mount = pos.tree?.prop(NodeProp.mounted)
         if (mount && mount.parser == parser) {
           for (let i = this.fragI; i < this.fragments.length; i++) {
             let frag = this.fragments[i]
