@@ -1,3 +1,9 @@
+## 0.15.4 (2021-08-31)
+
+### Bug fixes
+
+`parseMixed` will now scan children not covered by the ranges of an eagerly computed overlay for further nesting.
+
 ## 0.15.3 (2021-08-12)
 
 ### Bug fixes
