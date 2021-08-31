@@ -65,6 +65,8 @@ class ActiveOverlay {
   ) {}
 }
 
+type CoverInfo = null | {ranges: readonly {from: number, to: number}[], depth: number, prev: CoverInfo}
+
 class MixedParse implements PartialParse {
   baseParse: PartialParse | null
   inner: InnerParse[] = []
@@ -119,10 +121,12 @@ class MixedParse implements PartialParse {
 
   startInner() {
     let fragmentCursor = new FragmentCursor(this.fragments)
-    scan: for (let cursor = this.baseTree!.fullCursor(), nest, overlay: ActiveOverlay | null = null;;) {
+    let overlay: ActiveOverlay | null = null
+    let covered: CoverInfo = null
+    scan: for (let cursor = this.baseTree!.fullCursor(), nest, isCovered;;) {
       let enter = true, range
       if (fragmentCursor.hasNode(cursor)) {
-         if (overlay) {
+        if (overlay) {
           let match = overlay.mounts.find(m => m.frag.from <= cursor.from && m.frag.to >= cursor.to && m.mount.overlay)
           if (match) for (let r of match.mount.overlay!) {
             let from = r.from + match.pos, to = r.to + match.pos
@@ -130,6 +134,8 @@ class MixedParse implements PartialParse {
           }
         }
         enter = false
+      } else if (covered && (isCovered = checkCover(covered.ranges, cursor.from, cursor.to))) {
+        enter = isCovered != Cover.Full
       } else if (!cursor.type.isAnonymous && cursor.from < cursor.to && (nest = this.nest(cursor, this.input))) {
         if (!cursor.tree) materialize(cursor)
 
@@ -145,7 +151,8 @@ class MixedParse implements PartialParse {
             nest.overlay ? nest.overlay.map(r => new Range(r.from - cursor.from, r.to - cursor.from)) : null,
             cursor.tree!
           ))
-          enter = false
+          if (!nest.overlay) enter = false
+          else if (ranges.length) covered = {ranges, depth: 0, prev: covered}
         }
       } else if (overlay && (range = overlay.predicate(cursor))) {
         if (range === true) range = new Range(cursor.from, cursor.to)
@@ -153,6 +160,7 @@ class MixedParse implements PartialParse {
       }
       if (enter && cursor.firstChild()) {
         if (overlay) overlay.depth++
+        if (covered) covered.depth++
       } else {
         for (;;) {
           if (cursor.nextSibling()) break
@@ -167,10 +175,21 @@ class MixedParse implements PartialParse {
             ))
             overlay = overlay.prev
           }
+          if (covered && !--covered.depth) covered = covered.prev
         }
       }
     }
   }
+}
+
+const enum Cover { None = 0, Partial = 1, Full = 2 }
+
+function checkCover(covered: readonly {from: number, to: number}[], from: number, to: number) {
+  for (let range of covered) {
+    if (range.from >= to) break
+    if (range.to > from) return range.from <= from && range.to >= to ? Cover.Full : Cover.Partial
+  }
+  return Cover.None
 }
 
 // Take a piece of buffer and convert it into a stand-alone
