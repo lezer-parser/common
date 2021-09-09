@@ -1,3 +1,9 @@
+## 0.15.5 (2021-09-09)
+
+### New features
+
+Syntax node objects now have a method `enterUnfinishedNodesBefore` to scan down the tree for nodes that were broken off directly in front of a given position (which can provide a more accurate context that just resolving the position).
+
 ## 0.15.4 (2021-08-31)
 
 ### Bug fixes
