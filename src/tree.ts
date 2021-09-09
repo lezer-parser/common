@@ -638,6 +638,10 @@ export interface SyntaxNode {
   /// is 1) the given position. Will look in parent nodes if the
   /// position is outside this node.
   resolve(pos: number, side?: -1 | 0 | 1): SyntaxNode
+  /// Move the position to the innermost node before `pos` that looks
+  /// like it is unfinished (meaning it ends in an error node or has a
+  /// child ending in an error node right at its end).
+  enterUnfinishedNodesBefore(pos: number): SyntaxNode
   /// Get the [tree](#common.Tree) that represents the current node, if
   /// any. Will return null when the node is in a [tree
   /// buffer](#common.TreeBuffer).
@@ -682,6 +686,21 @@ function checkSide(side: Side, pos: number, from: number, to: number) {
 const enum Mode {
   Full = 1,
   NoEnterBuffer = 2,
+}
+
+function enterUnfinishedNodesBefore(node: SyntaxNode, pos: number) {
+  let scan = node.childBefore(pos)
+  while (scan) {
+    let last = scan.lastChild
+    if (!last || last.to != scan.to) break
+    if (last.type.isError && last.from == last.to) {
+      node = scan
+      scan = last.prevSibling
+    } else {
+      scan = last
+    }
+  }
+  return node
 }
 
 class TreeNode implements SyntaxNode {
@@ -770,6 +789,8 @@ class TreeNode implements SyntaxNode {
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     return this.cursor.moveTo(pos, side).node
   }
+
+  enterUnfinishedNodesBefore(pos: number) { return enterUnfinishedNodesBefore(this, pos) }
 
   getChild(type: string | number, before: string | number | null = null, after: string | number | null = null) {
     let r = getChildren(this, type, before, after)
@@ -878,6 +899,8 @@ class BufferNode implements SyntaxNode {
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     return this.cursor.moveTo(pos, side).node
   }
+
+  enterUnfinishedNodesBefore(pos: number) { return enterUnfinishedNodesBefore(this, pos) }
 
   /// @internal
   toString() { return this.context.buffer.childString(this.index) }
