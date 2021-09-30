@@ -1,6 +1,6 @@
 {
   "name": "@lezer/common",
-  "version": "0.15.5",
+  "version": "0.15.6",
   "description": "Syntax tree data structure and parser interfaces for the lezer parser",
   "main": "dist/index.cjs",
   "type": "module",

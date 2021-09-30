@@ -1,3 +1,9 @@
+## 0.15.6 (2021-09-30)
+
+### Bug fixes
+
+Fix a null-dereference crash in mixed-language parsing.
+
 ## 0.15.5 (2021-09-09)
 
 ### New features
