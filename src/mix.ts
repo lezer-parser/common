@@ -260,7 +260,7 @@ class StructureCursor {
 
   hasNode(cursor: TreeCursor) {
     this.moveTo(cursor.from)
-    if (!this.done && this.cursor.from + this.offset == cursor.from) {
+    if (!this.done && this.cursor.from + this.offset == cursor.from && this.cursor.tree) {
       for (let tree = this.cursor.tree!;;) {
         if (tree == cursor.tree) return true
         if (tree.children.length && tree.positions[0] == 0 && tree.children[0] instanceof Tree) tree = tree.children[0]
