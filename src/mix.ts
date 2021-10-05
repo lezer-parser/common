@@ -1,4 +1,4 @@
-import {Tree, TreeBuffer, NodeType, SyntaxNode, NodeProp, TreeCursor, MountedTree, Range} from "./tree"
+import {Tree, TreeBuffer, NodeType, SyntaxNode, NodeProp, TreeCursor, MountedTree, Range, Mode, TreeNode} from "./tree"
 import {Input, Parser, PartialParse, TreeFragment, ParseWrapper} from "./parse"
 
 /// Objects returned by the function passed to
@@ -123,7 +123,8 @@ class MixedParse implements PartialParse {
     let fragmentCursor = new FragmentCursor(this.fragments)
     let overlay: ActiveOverlay | null = null
     let covered: CoverInfo = null
-    scan: for (let cursor = this.baseTree!.fullCursor(), nest, isCovered;;) {
+    let cursor = new TreeCursor(new TreeNode(this.baseTree!, this.ranges[0].from, 0, null), Mode.Full)
+    scan: for (let nest, isCovered;;) {
       let enter = true, range
       if (fragmentCursor.hasNode(cursor)) {
         if (overlay) {

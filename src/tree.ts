@@ -683,7 +683,7 @@ function checkSide(side: Side, pos: number, from: number, to: number) {
   }
 }
 
-const enum Mode {
+export const enum Mode {
   Full = 1,
   NoEnterBuffer = 2,
 }
@@ -703,7 +703,7 @@ function enterUnfinishedNodesBefore(node: SyntaxNode, pos: number) {
   return node
 }
 
-class TreeNode implements SyntaxNode {
+export class TreeNode implements SyntaxNode {
   constructor(readonly node: Tree,
               readonly _from: number,
               // Index in parent node, set to -1 if the node is not a direct child of _parent.node (overlay)
