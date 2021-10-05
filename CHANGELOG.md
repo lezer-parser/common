@@ -1,3 +1,9 @@
+## 0.15.7 (2021-10-05)
+
+### Bug fixes
+
+Fix an issue in `parseMixed` where parses nested two or more levels deep would use the wrong document offsets.
+
 ## 0.15.6 (2021-09-30)
 
 ### Bug fixes
