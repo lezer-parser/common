@@ -1022,7 +1022,7 @@ export class TreeCursor {
     return buffers ? this.enterChild(1, pos, side) : false
   }
 
-  /// Move the node's parent node, if this isn't the top node.
+  /// Move to the node's parent node, if this isn't the top node.
   parent() {
     if (!this.buffer) return this.yieldNode((this.mode & Mode.Full) ? this._tree._parent : this._tree.parent)
     if (this.stack.length) return this.yieldBuf(this.stack.pop()!)
