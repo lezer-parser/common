@@ -1,3 +1,9 @@
+## 0.15.8 (2021-11-10)
+
+### Bug fixes
+
+Fix a bug that could cause incorrectly structured nodes to be created for repeat rules, breaking incremental parsing using the resulting tree.
+
 ## 0.15.7 (2021-10-05)
 
 ### Bug fixes
