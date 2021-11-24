@@ -46,7 +46,8 @@ class InnerParse {
     readonly parser: Parser,
     readonly parse: PartialParse,
     readonly overlay: readonly {from: number, to: number}[] | null,
-    readonly target: Tree
+    readonly target: Tree,
+    readonly ranges: readonly {from: number, to: number}[],
   ) {}
 }
 
@@ -118,7 +119,10 @@ class MixedParse implements PartialParse {
   get parsedPos() {
     if (this.baseParse) return 0
     let pos = this.input.length
-    for (let i = this.innerDone; i < this.inner.length; i++) pos = Math.min(pos, this.inner[i].parse.parsedPos)
+    for (let i = this.innerDone; i < this.inner.length; i++) {
+      if (this.inner[i].ranges[0].from < pos)
+        pos = Math.min(pos, this.inner[i].parse.parsedPos)
+    }
     return pos
   }
 
@@ -159,7 +163,8 @@ class MixedParse implements PartialParse {
             nest.parser,
             nest.parser.startParse(this.input, enterFragments(oldMounts, ranges), ranges),
             nest.overlay ? nest.overlay.map(r => new Range(r.from - cursor.from, r.to - cursor.from)) : null,
-            cursor.tree!
+            cursor.tree!,
+            ranges,
           ))
           if (!nest.overlay) enter = false
           else if (ranges.length) covered = {ranges, depth: 0, prev: covered}
@@ -181,7 +186,8 @@ class MixedParse implements PartialParse {
               overlay.parser,
               overlay.parser.startParse(this.input, enterFragments(overlay.mounts, ranges), ranges),
               overlay.ranges.map(r => new Range(r.from - overlay!.start, r.to - overlay!.start)),
-              overlay.target
+              overlay.target,
+              ranges
             ))
             overlay = overlay.prev
           }
