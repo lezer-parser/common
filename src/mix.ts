@@ -109,8 +109,9 @@ class MixedParse implements PartialParse {
 
   get parsedPos() {
     if (this.baseParse) return 0
-    let next = this.inner[this.innerDone]
-    return next ? next.parse.parsedPos : this.input.length
+    let pos = this.input.length
+    for (let i = this.innerDone; i < this.inner.length; i++) pos = Math.min(pos, this.inner[i].parse.parsedPos)
+    return pos
   }
 
   stopAt(pos: number) {
