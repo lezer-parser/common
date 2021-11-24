@@ -94,6 +94,7 @@ class MixedParse implements PartialParse {
       this.baseParse = null
       this.baseTree = done
       this.startInner()
+      if (this.stoppedAt != null) for (let inner of this.inner) inner.parse.stopAt(this.stoppedAt)
     }
     if (this.innerDone == this.inner.length) {
       let result = this.baseTree!
