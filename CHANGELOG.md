@@ -1,3 +1,11 @@
+## 0.15.9 (2021-11-24)
+
+### Bug fixes
+
+Full tree cursors no longer automatically enter mounted subtrees.
+
+Fix a bug where a nested parser would not re-parse inner sections when given fragments produced by a parse that finished the outer tree but was stopped before the inner trees were done.
+
 ## 0.15.8 (2021-11-10)
 
 ### Bug fixes
