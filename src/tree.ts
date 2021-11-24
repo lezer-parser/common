@@ -345,7 +345,8 @@ export class Tree {
 
   /// Get a [tree cursor](#common.TreeCursor) that, unlike regular
   /// cursors, doesn't skip through
-  /// [anonymous](#common.NodeType.isAnonymous) nodes.
+  /// [anonymous](#common.NodeType.isAnonymous) nodes and doesn't
+  /// automatically enter mounted nodes.
   fullCursor(): TreeCursor {
     return new TreeCursor(this.topNode as TreeNode, Mode.Full)
   }
@@ -730,7 +731,7 @@ export class TreeNode implements SyntaxNode {
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
         } else if ((mode & Mode.Full) || (!next.type.isAnonymous || hasChild(next))) {
           let mounted
-          if (next.props && (mounted = next.prop(NodeProp.mounted)) && !mounted.overlay)
+          if (!(mode & Mode.Full) && next.props && (mounted = next.prop(NodeProp.mounted)) && !mounted.overlay)
             return new TreeNode(mounted.tree, start, i, parent)
           let inner = new TreeNode(next, start, i, parent)
           return (mode & Mode.Full) || !inner.type.isAnonymous ? inner
@@ -1019,7 +1020,7 @@ export class TreeCursor {
   /// [mounted](#common.NodeProp^mounted) trees unless `overlays` is
   /// set to false.
   enter(pos: number, side: -1 | 0 | 1, overlays = true, buffers = true) {
-    if (!this.buffer) return this.yield(this._tree.enter(pos, side, overlays, buffers))
+    if (!this.buffer) return this.yield(this._tree.enter(pos, side, overlays && !(this.mode & Mode.Full), buffers))
     return buffers ? this.enterChild(1, pos, side) : false
   }
 
