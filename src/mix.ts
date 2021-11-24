@@ -67,6 +67,8 @@ class ActiveOverlay {
 
 type CoverInfo = null | {ranges: readonly {from: number, to: number}[], depth: number, prev: CoverInfo}
 
+const stoppedInner = new NodeProp<number>({perNode: true})
+
 class MixedParse implements PartialParse {
   baseParse: PartialParse | null
   inner: InnerParse[] = []
@@ -92,7 +94,13 @@ class MixedParse implements PartialParse {
       this.baseTree = done
       this.startInner()
     }
-    if (this.innerDone == this.inner.length) return this.baseTree
+    if (this.innerDone == this.inner.length) {
+      let result = this.baseTree!
+      if (this.stoppedAt != null)
+        result = new Tree(result.type, result.children, result.positions, result.length,
+                          result.propValues.concat([[stoppedInner, this.stoppedAt]]))
+      return result
+    }
     let inner = this.inner[this.innerDone], done = inner.parse.advance()
     if (done) {
       this.innerDone++
@@ -275,12 +283,14 @@ class StructureCursor {
 
 class FragmentCursor {
   curFrag: TreeFragment | null
+  curTo = 0
   fragI = 0
   inner: StructureCursor | null
 
   constructor(readonly fragments: readonly TreeFragment[]) {
     if (fragments.length) {
       let first = this.curFrag = fragments[0]
+      this.curTo = first.tree.prop(stoppedInner) ?? first.to
       this.inner = new StructureCursor(first.tree, -first.offset)
     } else {
       this.curFrag = this.inner = null
@@ -288,8 +298,8 @@ class FragmentCursor {
   }
 
   hasNode(node: TreeCursor) {
-    while (this.curFrag && node.from >= this.curFrag.to) this.nextFrag()
-    return this.curFrag && this.curFrag.from <= node.from && this.curFrag.to >= node.to && this.inner!.hasNode(node)
+    while (this.curFrag && node.from >= this.curTo) this.nextFrag()
+    return this.curFrag && this.curFrag.from <= node.from && this.curTo >= node.to && this.inner!.hasNode(node)
   }
 
   nextFrag() {
@@ -298,6 +308,7 @@ class FragmentCursor {
       this.curFrag = this.inner = null
     } else {
       let frag = this.curFrag = this.fragments[this.fragI]
+      this.curTo = frag.tree.prop(stoppedInner) ?? frag.to
       this.inner = new StructureCursor(frag.tree, -frag.offset)
     }
   }
