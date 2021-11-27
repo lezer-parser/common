@@ -138,7 +138,7 @@ class MixedParse implements PartialParse {
     let overlay: ActiveOverlay | null = null
     let covered: CoverInfo = null
     let cursor = new TreeCursor(new TreeNode(this.baseTree!, this.ranges[0].from, 0, null), Mode.Full)
-    scan: for (let nest, isCovered;;) {
+    scan: for (let nest, isCovered; this.stoppedAt == null || cursor.from < this.stoppedAt;) {
       let enter = true, range
       if (fragmentCursor.hasNode(cursor)) {
         if (overlay) {
