@@ -1,3 +1,9 @@
+## 0.15.10 (2021-11-30)
+
+### New features
+
+`SyntaxNode` now has a `resolveInner` method (analogous to `Tree.resolveInner`).
+
 ## 0.15.9 (2021-11-24)
 
 ### Bug fixes
