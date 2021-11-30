@@ -270,7 +270,7 @@ export class NodeSet {
   }
 }
 
-const CachedNode = new WeakMap<Tree, TreeNode>()
+const CachedNode = new WeakMap<Tree, SyntaxNode>(), CachedInnerNode = new WeakMap<Tree, SyntaxNode>()
 
 /// A piece of syntax tree. There are two ways to approach these
 /// trees: the way they are actually stored in memory, and the
@@ -334,8 +334,8 @@ export class Tree {
   /// `pos` is given, the cursor is [moved](#common.TreeCursor.moveTo)
   /// to the given position and side.
   cursor(pos?: number, side: -1 | 0 | 1 = 0): TreeCursor {
-    let scope = (pos != null && CachedNode.get(this)) || (this.topNode as TreeNode)
-    let cursor = new TreeCursor(scope)
+    let scope = (pos != null && CachedNode.get(this)) || this.topNode
+    let cursor = new TreeCursor(scope as TreeNode | BufferNode)
     if (pos != null) {
       cursor.moveTo(pos, side)
       CachedNode.set(this, cursor._tree)
@@ -363,7 +363,9 @@ export class Tree {
   /// position. With 0, it'll only enter nodes that cover the position
   /// from both sides.
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
-    return this.cursor(pos, side).node
+    let node = resolveNode(CachedNode.get(this) || this.topNode, pos, side, false)
+    CachedNode.set(this, node)
+    return node
   }
 
   /// Like [`resolve`](#common.Tree.resolve), but will enter
@@ -372,12 +374,9 @@ export class Tree {
   /// (with parent links going through all parent structure, including
   /// the host trees).
   resolveInner(pos: number, side: -1 | 0 | 1 = 0) {
-    let result = this.topNode
-    for (;;) {
-      let inner = result.enter(pos, side)
-      if (!inner) return result
-      result = inner
-    }
+    let node = resolveNode(CachedInnerNode.get(this) || this.topNode, pos, side, true)
+    CachedInnerNode.set(this, node)
+    return node
   }
 
   /// Iterate over the tree and its children, calling `enter` for any
@@ -640,6 +639,9 @@ export interface SyntaxNode {
   /// is 1) the given position. Will look in parent nodes if the
   /// position is outside this node.
   resolve(pos: number, side?: -1 | 0 | 1): SyntaxNode
+  /// Similar to `resolve`, but enter
+  /// [overlaid](#common.MountedTree.overlay) nodes.
+  resolveInner(pos: number, side?: -1 | 0 | 1): SyntaxNode
   /// Move the position to the innermost node before `pos` that looks
   /// like it is unfinished (meaning it ends in an error node or has a
   /// child ending in an error node right at its end).
@@ -703,6 +705,27 @@ function enterUnfinishedNodesBefore(node: SyntaxNode, pos: number) {
     }
   }
   return node
+}
+
+function resolveNode(node: SyntaxNode, pos: number, side: -1 | 0 | 1, overlays: boolean) {
+  // Move up to a node that actually holds the position, if possible
+  while (node.from == node.to ||
+         (side < 1 ? node.from >= pos : node.from > pos) ||
+         (side > -1 ? node.to <= pos : node.to < pos)) {
+    let parent = !overlays && node instanceof TreeNode && node.index < 0 ? null : node.parent
+    if (!parent) return node
+    node = parent
+  }
+  // Must go up out of overlays when those do not overlap with pos
+  if (overlays) for (let scan: SyntaxNode | null = node, parent = scan.parent; parent; scan = parent, parent = scan.parent) {
+    if (scan instanceof TreeNode && scan.index < 0 && parent.enter(pos, side, true)?.from != scan.from)
+      node = parent
+  }
+  for (;;) {
+    let inner = node.enter(pos, side, overlays)
+    if (!inner) return node
+    node = inner
+  }
 }
 
 export class TreeNode implements SyntaxNode {
@@ -789,7 +812,11 @@ export class TreeNode implements SyntaxNode {
   toTree() { return this.node }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
-    return this.cursor.moveTo(pos, side).node
+    return resolveNode(this, pos, side, false)
+  }
+
+  resolveInner(pos: number, side: -1 | 0 | 1 = 0) {
+    return resolveNode(this, pos, side, true)
   }
 
   enterUnfinishedNodesBefore(pos: number) { return enterUnfinishedNodesBefore(this, pos) }
@@ -899,7 +926,11 @@ class BufferNode implements SyntaxNode {
   }
 
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
-    return this.cursor.moveTo(pos, side).node
+    return resolveNode(this, pos, side, false)
+  }
+
+  resolveInner(pos: number, side: -1 | 0 | 1 = 0) {
+    return resolveNode(this, pos, side, true)
   }
 
   enterUnfinishedNodesBefore(pos: number) { return enterUnfinishedNodesBefore(this, pos) }
