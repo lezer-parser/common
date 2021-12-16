@@ -1,3 +1,9 @@
+## 0.15.11 (2021-12-16)
+
+### Bug fixes
+
+Fix a bug where nested parsing would sometimes corrupt the length of parent nodes around the nesting point.
+
 ## 0.15.10 (2021-11-30)
 
 ### New features
