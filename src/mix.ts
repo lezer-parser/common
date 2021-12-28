@@ -1,4 +1,5 @@
-import {Tree, TreeBuffer, NodeType, SyntaxNode, NodeProp, TreeCursor, MountedTree, Range, Mode, TreeNode} from "./tree"
+import {Tree, TreeBuffer, NodeType, SyntaxNodeRef, SyntaxNode, NodeProp,
+        TreeCursor, MountedTree, Range, Mode, TreeNode} from "./tree"
 import {Input, Parser, PartialParse, TreeFragment, ParseWrapper} from "./parse"
 
 /// Objects returned by the function passed to
@@ -24,7 +25,7 @@ export interface NestedParse {
   /// optimize range-finding in reused nodes, which means it's a good
   /// idea to use a function here when the target node is expected to
   /// have a large, deep structure.
-  overlay?: readonly {from: number, to: number}[] | ((node: TreeCursor) => {from: number, to: number} | boolean)
+  overlay?: readonly {from: number, to: number}[] | ((node: SyntaxNodeRef) => {from: number, to: number} | boolean)
 }
 
 /// Create a parse wrapper that, after the inner parse completes,
@@ -37,7 +38,7 @@ export interface NestedParse {
 /// node, but _should not_ move that cursor, only inspect its
 /// properties and optionally access its
 /// [node object](#common.TreeCursor.node).
-export function parseMixed(nest: (node: TreeCursor, input: Input) => NestedParse | null): ParseWrapper {
+export function parseMixed(nest: (node: SyntaxNodeRef, input: Input) => NestedParse | null): ParseWrapper {
   return (parse, input, fragments, ranges): PartialParse => new MixedParse(parse, nest, input, fragments, ranges)
 }
 
@@ -57,7 +58,7 @@ class ActiveOverlay {
 
   constructor(
     readonly parser: Parser,
-    readonly predicate: (node: TreeCursor) => {from: number, to: number} | boolean,
+    readonly predicate: (node: SyntaxNodeRef) => {from: number, to: number} | boolean,
     readonly mounts: readonly ReusableMount[],
     readonly index: number,
     readonly start: number,
@@ -79,7 +80,7 @@ class MixedParse implements PartialParse {
 
   constructor(
     base: PartialParse,
-    readonly nest: (node: TreeCursor, input: Input) => NestedParse | null,
+    readonly nest: (node: SyntaxNodeRef, input: Input) => NestedParse | null,
     readonly input: Input,
     readonly fragments: readonly TreeFragment[],
     readonly ranges: readonly {from: number, to: number}[]

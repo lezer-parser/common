@@ -15,6 +15,8 @@ cheap to store.
 
 @Tree
 
+@SyntaxNodeRef
+
 @SyntaxNode
 
 @TreeCursor

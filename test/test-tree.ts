@@ -87,7 +87,7 @@ describe("SyntaxNode", () => {
 
   it("can resolve in a large tree", () => {
     let c: SyntaxNode | null = recur().resolve(10, 1), depth = 1
-    while (c = c.parent) depth++
+    while (c = c && c.parent) depth++
     ist(depth, 8)
   })
 
