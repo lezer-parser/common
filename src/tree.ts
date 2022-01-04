@@ -707,7 +707,7 @@ function enterUnfinishedNodesBefore(node: SyntaxNode, pos: number) {
   return node
 }
 
-function resolveNode(node: SyntaxNode, pos: number, side: -1 | 0 | 1, overlays: boolean) {
+function resolveNode(node: SyntaxNode, pos: number, side: -1 | 0 | 1, overlays: boolean): SyntaxNode {
   // Move up to a node that actually holds the position, if possible
   while (node.from == node.to ||
          (side < 1 ? node.from >= pos : node.from > pos) ||
