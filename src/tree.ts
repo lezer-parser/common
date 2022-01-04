@@ -1186,6 +1186,30 @@ export class TreeCursor implements SyntaxNodeRef {
   get tree(): Tree | null {
     return this.buffer ? null : this._tree._tree
   }
+
+  /// Iterate over the current node and all its descendants, calling
+  /// `enter` when entering a node and `leave`, if given, when leaving
+  /// one. When `enter` returns `false`, any children of that node are
+  /// skipped, and `leave` isn't called for it.
+  iterate(enter: (node: SyntaxNodeRef) => boolean | void,
+          leave?: (node: SyntaxNodeRef) => void) {
+    for (let depth = 0;;) {
+      let mustLeave = false
+      if (this.type.isAnonymous || enter(this) !== false) {
+        if (this.firstChild()) { depth++; continue }
+        if (!this.type.isAnonymous) mustLeave = true
+      }
+      for (;;) {
+        if (mustLeave && leave) leave(this)
+        mustLeave = this.type.isAnonymous
+        if (this.nextSibling()) break
+        if (!depth) return
+        this.parent()
+        depth--
+        mustLeave = true
+      }
+    }
+  }
 }
 
 function hasChild(tree: Tree): boolean {
