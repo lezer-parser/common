@@ -675,6 +675,11 @@ export interface SyntaxNode extends SyntaxNodeRef {
   /// Like [`getChild`](#common.SyntaxNode.getChild), but return all
   /// matching children, not just the first.
   getChildren(type: string | number, before?: string | number | null, after?: string | number | null): SyntaxNode[]
+
+  /// Test whether the node matches a given context—a sequence of
+  /// direct parent nodes. Empty strings in the context array act as
+  /// wildcards, other strings must match the ancestor node's name.
+  matchContext(context: readonly string[]): boolean
 }
 
 const enum Side {
@@ -842,6 +847,8 @@ export class TreeNode implements SyntaxNode {
   toString() { return this._tree.toString() }
 
   get node() { return this }
+
+  matchContext(context: readonly string[]): boolean { return matchNodeContext(this, context) }
 }
 
 function getChildren(node: SyntaxNode, type: string | number, before: string | number | null, after: string | number | null): SyntaxNode[] {
@@ -853,6 +860,17 @@ function getChildren(node: SyntaxNode, type: string | number, before: string | n
     if (cur.type.is(type)) result.push(cur.node)
     if (!cur.nextSibling()) return after == null ? result : []
   }
+}
+
+function matchNodeContext(node: SyntaxNode, context: readonly string[], i = context.length - 1): boolean {
+  for (let p: SyntaxNode | null = node.parent; i >= 0; p = p.parent) {
+    if (!p) return false
+    if (!p.type.isAnonymous) {
+      if (context[i] && context[i] != p.name) return false
+      i--
+    }
+  }
+  return true
 }
 
 class BufferContext {
@@ -958,6 +976,8 @@ class BufferNode implements SyntaxNode {
   }
 
   get node() { return this }
+
+  matchContext(context: readonly string[]): boolean { return matchNodeContext(this, context) }
 }
 
 /// A tree cursor object focuses on a given node in a syntax tree, and
@@ -1209,6 +1229,22 @@ export class TreeCursor implements SyntaxNodeRef {
         mustLeave = true
       }
     }
+  }
+
+  /// Test whether the current node matches a given context—a sequence
+  /// of direct parent node names. Empty strings in the context array
+  /// are treated as wildcards.
+  matchContext(context: readonly string[]): boolean {
+    if (!this.buffer) return matchNodeContext(this.node, context)
+    for (let i = context.length - 1, d = this.stack.length - 1; i >= 0; d--) {
+      if (d < 0) return matchNodeContext(this.node, context, i)
+      let type = this.buffer.buffer.set.types[this.buffer.buffer.buffer[this.stack[d]]]
+      if (!type.isAnonymous) {
+        if (context[i] && context[i] != type.name) return false
+        i--
+      }
+    }
+    return true
   }
 }
 
