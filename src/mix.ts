@@ -138,7 +138,7 @@ class MixedParse implements PartialParse {
     let overlay: ActiveOverlay | null = null
     let covered: CoverInfo = null
     let cursor = new TreeCursor(new TreeNode(this.baseTree!, this.ranges[0].from, 0, null), Mode.Full)
-    scan: for (let nest, isCovered; this.stoppedAt == null || cursor.from < this.stoppedAt;) {
+    for (let nest, isCovered; this.stoppedAt == null || cursor.from < this.stoppedAt;) {
       let enter = true, range
       if (fragmentCursor.hasNode(cursor)) {
         if (overlay) {
@@ -180,7 +180,7 @@ class MixedParse implements PartialParse {
       } else {
         for (;;) {
           if (cursor.nextSibling()) break
-          if (!cursor.parent()) break scan
+          if (!cursor.parent()) return
           if (overlay && !--overlay.depth) {
             let ranges = punchRanges(this.ranges, overlay.ranges)
             if (ranges.length) this.inner.splice(overlay.index, 0, new InnerParse(
