@@ -997,9 +997,11 @@ export class TreeCursor implements SyntaxNodeRef {
 
   /// @internal
   _tree!: TreeNode
-  private buffer: BufferContext | null = null
+  /// @internal
+  buffer: BufferContext | null = null
   private stack: number[] = []
-  private index: number = 0
+  /// @internal
+  index: number = 0
   private bufferNode: BufferNode | null = null
 
   /// @internal
@@ -1514,4 +1516,46 @@ function balanceRange(
   }
   divide(children, positions, from, to, 0)
   return (mkTop || mkTree)(localChildren, localPositions, length)
+}
+
+/// Provides a way to associate values with pieces of trees. As long
+/// as that part of the tree is reused, the associated values can be
+/// retrieved from an updated tree.
+export class NodeWeakMap<T> {
+  private map = new WeakMap<Tree | TreeBuffer, T | Map<number, T>>()
+
+  private setBuffer(buffer: TreeBuffer, index: number, value: T) {
+    let inner = this.map.get(buffer) as Map<number, T> | undefined
+    if (!inner) this.map.set(buffer, inner = new Map)
+    inner.set(index, value)
+  }
+
+  private getBuffer(buffer: TreeBuffer, index: number): T | undefined {
+    let inner = this.map.get(buffer) as Map<number, T> | undefined
+    return inner && inner.get(index)
+  }
+
+  /// Set the value for this syntax node.
+  set(node: SyntaxNode, value: T) {
+    if (node instanceof BufferNode) this.setBuffer(node.context.buffer, node.index, value)
+    else if (node instanceof TreeNode) this.map.set(node.tree, value)
+  }
+
+  /// Retrieve value for this syntax node, if it exists in the map.
+  get(node: SyntaxNode): T | undefined {
+    return node instanceof BufferNode ? this.getBuffer(node.context.buffer, node.index)
+      : node instanceof TreeNode ? this.map.get(node.tree) as T | undefined : undefined
+  }
+
+  /// Set the value for the node that a cursor currently points to.
+  cursorSet(cursor: TreeCursor, value: T) {
+    if (cursor.buffer) this.setBuffer(cursor.buffer.buffer, cursor.index, value)
+    else this.map.set(cursor.tree!, value)
+  }
+
+  /// Retrieve the value for the node that a cursor currently points
+  /// to.
+  cursorGet(cursor: TreeCursor): T | undefined {
+    return cursor.buffer ? this.getBuffer(cursor.buffer.buffer, cursor.index) : this.map.get(cursor.tree!) as T | undefined
+  }
 }
