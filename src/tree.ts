@@ -1236,9 +1236,10 @@ export class TreeCursor implements SyntaxNodeRef {
   /// are treated as wildcards.
   matchContext(context: readonly string[]): boolean {
     if (!this.buffer) return matchNodeContext(this.node, context)
+    let {buffer} = this.buffer, {types} = buffer.set
     for (let i = context.length - 1, d = this.stack.length - 1; i >= 0; d--) {
       if (d < 0) return matchNodeContext(this.node, context, i)
-      let type = this.buffer.buffer.set.types[this.buffer.buffer.buffer[this.stack[d]]]
+      let type = types[buffer.buffer[this.stack[d]]]
       if (!type.isAnonymous) {
         if (context[i] && context[i] != type.name) return false
         i--
