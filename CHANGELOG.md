@@ -1,3 +1,11 @@
+## 0.15.12 (2022-03-18)
+
+### Bug fixes
+
+Work around a TypeScript issue that caused it to infer return type `any` for `resolve` and `resolveInner`.
+
+Fix a bug in incremental mixed-language parsing where it could incorrectly add a parse range twice, causing a crash in the inner parser.
+
 ## 0.15.11 (2021-12-16)
 
 ### Bug fixes
