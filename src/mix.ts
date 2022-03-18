@@ -145,7 +145,8 @@ class MixedParse implements PartialParse {
           let match = overlay.mounts.find(m => m.frag.from <= cursor.from && m.frag.to >= cursor.to && m.mount.overlay)
           if (match) for (let r of match.mount.overlay!) {
             let from = r.from + match.pos, to = r.to + match.pos
-            if (from >= cursor.from && to <= cursor.to) overlay.ranges.push({from, to})
+            if (from >= cursor.from && to <= cursor.to && !overlay.ranges.some(r => r.from < to && r.to > from))
+              overlay.ranges.push({from, to})
           }
         }
         enter = false
