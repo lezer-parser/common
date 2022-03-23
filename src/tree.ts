@@ -404,22 +404,21 @@ export class Tree {
   /// leaving the node. When `enter` returns `false`, that node will
   /// not have its children iterated over (or `leave` called).
   iterate(spec: {
-    enter(type: NodeType, from: number, to: number, get: () => SyntaxNode): false | void,
-    leave?(type: NodeType, from: number, to: number, get: () => SyntaxNode): void,
+    enter(node: SyntaxNodeRef): boolean | void,
+    leave?(node: SyntaxNodeRef): void,
     from?: number,
     to?: number,
     mode?: IterMode
   }) {
-    // FIXME pass SyntaxNodeRef arguments on next breaking release
     let {enter, leave, from = 0, to = this.length} = spec
-    for (let c = this.cursor((spec.mode || 0) | IterMode.IncludeAnonymous), get = () => c.node;;) {
+    for (let c = this.cursor((spec.mode || 0) | IterMode.IncludeAnonymous);;) {
       let entered = false
-      if (c.from <= to && c.to >= from && (c.type.isAnonymous || enter(c.type, c.from, c.to, get) !== false)) {
+      if (c.from <= to && c.to >= from && (c.type.isAnonymous || enter(c) !== false)) {
         if (c.firstChild()) continue
         entered = true
       }
       for (;;) {
-        if (entered && leave && !c.type.isAnonymous) leave(c.type, c.from, c.to, get)
+        if (entered && leave && !c.type.isAnonymous) leave(c)
         if (c.nextSibling()) break
         if (!c.parent()) return
         entered = true
