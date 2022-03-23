@@ -272,6 +272,28 @@ export class NodeSet {
 
 const CachedNode = new WeakMap<Tree, SyntaxNode>(), CachedInnerNode = new WeakMap<Tree, SyntaxNode>()
 
+/// Options that control iteration. Can be combined with the `|`
+/// operator to enable multiple ones.
+export enum IterMode {
+  /// When enabled, iteration will only visit [`Tree`](#common.Tree)
+  /// objects, not nodes packed into
+  /// [`TreeBuffer`](#common.TreeBuffer)s.
+  ExcludeBuffers = 1,
+  /// Enable this to make iteration include anonymous nodes (such as
+  /// the nodes that wrap repeated grammar constructs into a balanced
+  /// tree).
+  IncludeAnonymous = 2,
+  /// By default, regular [mounted](#common.NodeProp^mounted) nodes
+  /// replace their base node in iteration. Enable this to ignore them
+  /// instead.
+  IgnoreMounts = 4,
+  /// This option only applies in
+  /// [`enter`](#common.SyntaxNode.enter)-style methods. It tells the
+  /// library to not enter mounted overlays if one covers the given
+  /// position.
+  IgnoreOverlays = 8,
+}
+
 /// A piece of syntax tree. There are two ways to approach these
 /// trees: the way they are actually stored in memory, and the
 /// convenient way.
@@ -330,25 +352,22 @@ export class Tree {
   /// The empty tree
   static empty = new Tree(NodeType.none, [], [], 0)
 
-  /// Get a [tree cursor](#common.TreeCursor) rooted at this tree. When
-  /// `pos` is given, the cursor is [moved](#common.TreeCursor.moveTo)
-  /// to the given position and side.
-  cursor(pos?: number, side: -1 | 0 | 1 = 0): TreeCursor {
-    let scope = (pos != null && CachedNode.get(this)) || this.topNode
-    let cursor = new TreeCursor(scope as TreeNode | BufferNode)
-    if (pos != null) {
-      cursor.moveTo(pos, side)
-      CachedNode.set(this, cursor._tree)
-    }
-    return cursor
+  /// Get a [tree cursor](#common.TreeCursor) positioned at the top of
+  /// the tree. Mode can be used to [control](#common.IterMode) which
+  /// nodes the cursor visits.
+  cursor(mode: IterMode = 0) {
+    return new TreeCursor(this.topNode as TreeNode, mode)
   }
 
-  /// Get a [tree cursor](#common.TreeCursor) that, unlike regular
-  /// cursors, doesn't skip through
-  /// [anonymous](#common.NodeType.isAnonymous) nodes and doesn't
-  /// automatically enter mounted nodes.
-  fullCursor(): TreeCursor {
-    return new TreeCursor(this.topNode as TreeNode, Mode.Full)
+  /// Get a [tree cursor](#common.TreeCursor) pointing into this tree
+  /// at the given position and side (see
+  /// [`moveTo`](#common.TreeCursor.moveTo).
+  cursorAt(pos: number, side: -1 | 0 | 1 = 0, mode: IterMode = 0): TreeCursor {
+    let scope = CachedNode.get(this) || this.topNode
+    let cursor = new TreeCursor(scope as TreeNode | BufferNode)
+    cursor.moveTo(pos, side)
+    CachedNode.set(this, cursor._tree)
+    return cursor
   }
 
   /// Get a [syntax node](#common.SyntaxNode) object for the top of the
@@ -388,22 +407,22 @@ export class Tree {
     enter(type: NodeType, from: number, to: number, get: () => SyntaxNode): false | void,
     leave?(type: NodeType, from: number, to: number, get: () => SyntaxNode): void,
     from?: number,
-    to?: number
+    to?: number,
+    mode?: IterMode
   }) {
     // FIXME pass SyntaxNodeRef arguments on next breaking release
     let {enter, leave, from = 0, to = this.length} = spec
-    for (let c = this.cursor(), get = () => c.node;;) {
-      let mustLeave = false
+    for (let c = this.cursor((spec.mode || 0) | IterMode.IncludeAnonymous), get = () => c.node;;) {
+      let entered = false
       if (c.from <= to && c.to >= from && (c.type.isAnonymous || enter(c.type, c.from, c.to, get) !== false)) {
         if (c.firstChild()) continue
-        if (!c.type.isAnonymous) mustLeave = true
+        entered = true
       }
       for (;;) {
-        if (mustLeave && leave) leave(c.type, c.from, c.to, get)
-        mustLeave = c.type.isAnonymous
+        if (entered && leave && !c.type.isAnonymous) leave(c.type, c.from, c.to, get)
         if (c.nextSibling()) break
         if (!c.parent()) return
-        mustLeave = true
+        entered = true
       }
     }
   }
@@ -642,13 +661,13 @@ export interface SyntaxNode extends SyntaxNodeRef {
   /// [buffers](#common.TreeBuffer), only [nodes](#common.Tree) (which
   /// is mostly useful when looking for props, which cannot exist on
   /// buffer-allocated nodes).
-  enter(pos: number, side: -1 | 0 | 1, overlays?: boolean, buffers?: boolean): SyntaxNode | null
+  enter(pos: number, side: -1 | 0 | 1, mode?: IterMode): SyntaxNode | null
   /// This node's next sibling, if any.
   nextSibling: SyntaxNode | null
   /// This node's previous sibling.
   prevSibling: SyntaxNode | null
   /// A [tree cursor](#common.TreeCursor) starting at this node.
-  cursor: TreeCursor
+  cursor(mode?: IterMode): TreeCursor
   /// Find the node around, before (if `side` is -1), or after (`side`
   /// is 1) the given position. Will look in parent nodes if the
   /// position is outside this node.
@@ -702,11 +721,6 @@ function checkSide(side: Side, pos: number, from: number, to: number) {
   }
 }
 
-export const enum Mode {
-  Full = 1,
-  NoEnterBuffer = 2,
-}
-
 function enterUnfinishedNodesBefore(node: SyntaxNode, pos: number) {
   let scan = node.childBefore(pos)
   while (scan) {
@@ -731,13 +745,14 @@ function resolveNode(node: SyntaxNode, pos: number, side: -1 | 0 | 1, overlays: 
     if (!parent) return node
     node = parent
   }
+  let mode = overlays ? 0 : IterMode.IgnoreOverlays
   // Must go up out of overlays when those do not overlap with pos
   if (overlays) for (let scan: SyntaxNode | null = node, parent = scan.parent; parent; scan = parent, parent = scan.parent) {
-    if (scan instanceof TreeNode && scan.index < 0 && parent.enter(pos, side, true)?.from != scan.from)
+    if (scan instanceof TreeNode && scan.index < 0 && parent.enter(pos, side, mode)?.from != scan.from)
       node = parent
   }
   for (;;) {
-    let inner = node.enter(pos, side, overlays)
+    let inner = node.enter(pos, side, mode)
     if (!inner) return node
     node = inner
   }
@@ -756,25 +771,26 @@ export class TreeNode implements SyntaxNode {
 
   get to() { return this.from + this._tree.length }
 
-  nextChild(i: number, dir: 1 | -1, pos: number, side: Side, mode: Mode = 0): TreeNode | BufferNode | null {
+  nextChild(i: number, dir: 1 | -1, pos: number, side: Side, mode: IterMode = 0): TreeNode | BufferNode | null {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent._tree, e = dir > 0 ? children.length : -1; i != e; i += dir) {
         let next = children[i], start = positions[i] + parent.from
         if (!checkSide(side, pos, start, start + next.length)) continue
         if (next instanceof TreeBuffer) {
-          if (mode & Mode.NoEnterBuffer) continue
+          if (mode & IterMode.ExcludeBuffers) continue
           let index = next.findChild(0, next.buffer.length, dir, pos - start, side)
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
-        } else if ((mode & Mode.Full) || (!next.type.isAnonymous || hasChild(next))) {
+        } else if ((mode & IterMode.IncludeAnonymous) || (!next.type.isAnonymous || hasChild(next))) {
           let mounted
-          if (!(mode & Mode.Full) && next.props && (mounted = next.prop(NodeProp.mounted)) && !mounted.overlay)
+          if (!(mode & IterMode.IgnoreMounts) &&
+              next.props && (mounted = next.prop(NodeProp.mounted)) && !mounted.overlay)
             return new TreeNode(mounted.tree, start, i, parent)
           let inner = new TreeNode(next, start, i, parent)
-          return (mode & Mode.Full) || !inner.type.isAnonymous ? inner
+          return (mode & IterMode.IncludeAnonymous) || !inner.type.isAnonymous ? inner
             : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, pos, side)
         }
       }
-      if ((mode & Mode.Full) || !parent.type.isAnonymous) return null
+      if ((mode & IterMode.IncludeAnonymous) || !parent.type.isAnonymous) return null
       if (parent.index >= 0) i = parent.index + dir
       else i = dir < 0 ? -1 : parent._parent!._tree.children.length
       parent = parent._parent!
@@ -788,9 +804,9 @@ export class TreeNode implements SyntaxNode {
   childAfter(pos: number) { return this.nextChild(0, 1, pos, Side.After) }
   childBefore(pos: number) { return this.nextChild(this._tree.children.length - 1, -1, pos, Side.Before) }
 
-  enter(pos: number, side: -1 | 0 | 1, overlays = true, buffers = true) {
+  enter(pos: number, side: -1 | 0 | 1, mode = 0) {
     let mounted
-    if (overlays && (mounted = this._tree.prop(NodeProp.mounted)) && mounted.overlay) {
+    if (!(mode & IterMode.IgnoreOverlays) && (mounted = this._tree.prop(NodeProp.mounted)) && mounted.overlay) {
       let rPos = pos - this.from
       for (let {from, to} of mounted.overlay) {
         if ((side > 0 ? from <= rPos : from < rPos) &&
@@ -798,7 +814,7 @@ export class TreeNode implements SyntaxNode {
           return new TreeNode(mounted.tree, mounted.overlay[0].from + this.from, -1, this)
       }
     }
-    return this.nextChild(0, 1, pos, side, buffers ? 0 : Mode.NoEnterBuffer)
+    return this.nextChild(0, 1, pos, side, mode)
   }
 
   nextSignificantParent() {
@@ -818,7 +834,7 @@ export class TreeNode implements SyntaxNode {
     return this._parent && this.index >= 0 ? this._parent.nextChild(this.index - 1, -1, 0, Side.DontCare) : null
   }
 
-  get cursor() { return new TreeCursor(this) }
+  cursor(mode: IterMode = 0) { return new TreeCursor(this, mode) }
 
   get tree() { return this._tree }
 
@@ -852,7 +868,7 @@ export class TreeNode implements SyntaxNode {
 }
 
 function getChildren(node: SyntaxNode, type: string | number, before: string | number | null, after: string | number | null): SyntaxNode[] {
-  let cur = node.cursor, result: SyntaxNode[] = []
+  let cur = node.cursor(), result: SyntaxNode[] = []
   if (!cur.firstChild()) return result
   if (before != null) while (!cur.type.is(before)) if (!cur.nextSibling()) return result
   for (;;) {
@@ -907,8 +923,8 @@ class BufferNode implements SyntaxNode {
   childAfter(pos: number) { return this.child(1, pos, Side.After) }
   childBefore(pos: number) { return this.child(-1, pos, Side.Before) }
 
-  enter(pos: number, side: -1 | 0 | 1, overlays?: boolean, buffers = true) {
-    if (!buffers) return null
+  enter(pos: number, side: -1 | 0 | 1, mode: IterMode = 0) {
+    if (mode & IterMode.ExcludeBuffers) return null
     let {buffer} = this.context
     let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], side > 0 ? 1 : -1, pos - this.context.start, side)
     return index < 0 ? null : new BufferNode(this.context, this, index)
@@ -937,7 +953,7 @@ class BufferNode implements SyntaxNode {
     return new BufferNode(this.context, this._parent, buffer.findChild(parentStart, this.index, -1, 0, Side.DontCare))
   }
 
-  get cursor() { return new TreeCursor(this) }
+  cursor(mode: IterMode = 0) { return new TreeCursor(this, mode) }
 
   get tree() { return null }
 
@@ -1084,16 +1100,17 @@ export class TreeCursor implements SyntaxNodeRef {
   /// will also enter [overlaid](#common.MountedTree.overlay)
   /// [mounted](#common.NodeProp^mounted) trees unless `overlays` is
   /// set to false.
-  enter(pos: number, side: -1 | 0 | 1, overlays = true, buffers = true) {
-    if (!this.buffer) return this.yield(this._tree.enter(pos, side, overlays && !(this.mode & Mode.Full), buffers))
-    return buffers ? this.enterChild(1, pos, side) : false
+  enter(pos: number, side: -1 | 0 | 1, mode: IterMode = this.mode) {
+    if (!this.buffer)
+      return this.yield(this._tree.enter(pos, side, mode))
+    return mode & IterMode.ExcludeBuffers ? false : this.enterChild(1, pos, side)
   }
 
   /// Move to the node's parent node, if this isn't the top node.
   parent() {
-    if (!this.buffer) return this.yieldNode((this.mode & Mode.Full) ? this._tree._parent : this._tree.parent)
+    if (!this.buffer) return this.yieldNode((this.mode & IterMode.IncludeAnonymous) ? this._tree._parent : this._tree.parent)
     if (this.stack.length) return this.yieldBuf(this.stack.pop()!)
-    let parent = (this.mode & Mode.Full) ? this.buffer.parent : this.buffer.parent.nextSignificantParent()
+    let parent = (this.mode & IterMode.IncludeAnonymous) ? this.buffer.parent : this.buffer.parent.nextSignificantParent()
     this.buffer = null
     return this.yieldNode(parent)
   }
@@ -1139,7 +1156,10 @@ export class TreeCursor implements SyntaxNodeRef {
     for (; parent; {index, _parent: parent} = parent) {
       if (index > -1) for (let i = index + dir, e = dir < 0 ? -1 : parent._tree.children.length; i != e; i += dir) {
         let child = parent._tree.children[i]
-        if ((this.mode & Mode.Full) || child instanceof TreeBuffer || !child.type.isAnonymous || hasChild(child)) return false
+        if ((this.mode & IterMode.IncludeAnonymous) ||
+            child instanceof TreeBuffer ||
+            !child.type.isAnonymous ||
+            hasChild(child)) return false
       }
     }
     return true

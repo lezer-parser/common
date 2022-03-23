@@ -1,4 +1,4 @@
-import {Tree, NodeSet, NodeType, SyntaxNode, NodeProp} from "../dist/index.js"
+import {Tree, NodeSet, NodeType, SyntaxNode, NodeProp, IterMode} from "../dist/index.js"
 import ist from "ist"
 
 let types = "T a b c Pa Br".split(" ").map((s, i) => NodeType.define({
@@ -227,13 +227,13 @@ describe("TreeCursor", () => {
   })
 
   it("can move to a given position", () => {
-    let tree = recur(), start = tree.length >> 1, cursor = tree.cursor(start, 1)
+    let tree = recur(), start = tree.length >> 1, cursor = tree.cursorAt(start, 1)
     do { ist(cursor.from, start, ">=") }
     while (cursor.next())
   })
 
   it("can move into a parent node", () => {
-    let c = simple().cursor(10).moveTo(2)
+    let c = simple().cursorAt(10).moveTo(2)
     ist(c.name, "T")
   })
 
@@ -266,7 +266,7 @@ describe("TreeCursor", () => {
   })
 
   it("can produce nodes", () => {
-    let node = simple().cursor(8, 1).node
+    let node = simple().cursorAt(8, 1).node
     ist(node.name, "Br")
     ist(node.from, 8)
     ist(node.parent!.name, "Pa")
@@ -277,7 +277,7 @@ describe("TreeCursor", () => {
   })
 
   it("can produce node from cursors created from nodes", () => {
-    let cur = simple().topNode.lastChild!.childAfter(8)!.childAfter(10)!.cursor
+    let cur = simple().topNode.lastChild!.childAfter(8)!.childAfter(10)!.cursor()
     ist(cur.name, "c")
     ist(cur.from, 10)
     ist(cur.parent())
@@ -291,7 +291,7 @@ describe("TreeCursor", () => {
   })
 
   it("reuses nodes in buffers", () => {
-    let cur = simple().cursor(10, 1)
+    let cur = simple().cursorAt(10, 1)
     let n10 = cur.node
     ist(n10.name, "c")
     ist(n10.from, 10)
@@ -314,7 +314,7 @@ describe("TreeCursor", () => {
   })
 
   it("stops at anonymous nodes when configured as full", () => {
-    let c = anonTree.fullCursor()
+    let c = anonTree.cursor(IterMode.IncludeAnonymous)
     c.moveTo(1)
     ist(c.type, NodeType.none)
     ist(c.tree!.length, 2)

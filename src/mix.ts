@@ -1,5 +1,5 @@
 import {Tree, TreeBuffer, NodeType, SyntaxNodeRef, SyntaxNode, NodeProp,
-        TreeCursor, MountedTree, Range, Mode, TreeNode} from "./tree"
+        TreeCursor, MountedTree, Range, IterMode, TreeNode} from "./tree"
 import {Input, Parser, PartialParse, TreeFragment, ParseWrapper} from "./parse"
 
 /// Objects returned by the function passed to
@@ -138,7 +138,8 @@ class MixedParse implements PartialParse {
     let fragmentCursor = new FragmentCursor(this.fragments)
     let overlay: ActiveOverlay | null = null
     let covered: CoverInfo = null
-    let cursor = new TreeCursor(new TreeNode(this.baseTree!, this.ranges[0].from, 0, null), Mode.Full)
+    let cursor = new TreeCursor(new TreeNode(this.baseTree!, this.ranges[0].from, 0, null),
+                                IterMode.IncludeAnonymous | IterMode.IgnoreMounts)
     scan: for (let nest, isCovered; this.stoppedAt == null || cursor.from < this.stoppedAt;) {
       let enter = true, range
       if (fragmentCursor.hasNode(cursor)) {
@@ -265,14 +266,14 @@ class StructureCursor {
     root: Tree,
     private offset: number
   ) {
-    this.cursor = root.fullCursor()
+    this.cursor = root.cursor(IterMode.IncludeAnonymous | IterMode.IgnoreMounts)
   }
 
   // Move to the first node (in pre-order) that starts at or after `pos`.
   moveTo(pos: number) {
     let {cursor} = this, p = pos - this.offset
     while (!this.done && cursor.from < p) {
-      if (cursor.to >= pos && cursor.enter(p, 1, false, false)) {}
+      if (cursor.to >= pos && cursor.enter(p, 1, IterMode.IgnoreOverlays | IterMode.ExcludeBuffers)) {}
       else if (!cursor.next(false)) this.done = true
     }
   }
