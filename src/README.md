@@ -21,6 +21,10 @@ cheap to store.
 
 @TreeCursor
 
+@IterMode
+
+@NodeWeakMap
+
 #### Node types
 
 @NodeType
