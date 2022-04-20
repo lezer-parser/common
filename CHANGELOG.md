@@ -1,3 +1,29 @@
+## 0.16.0 (2022-04-20)
+
+### Breaking changes
+
+The mixed parsing interface now passes `SyntaxNodeRef` values instead of `TreeCursor` instances around.
+
+Creating a cursor at a given position is now done with `Tree.cursorAt`, not `cursor`.
+
+Getting a cursor from a syntax node is now done with a method (`cursor`) rather than a getter.
+
+`Tree.fullCursor` was removed and replaced by the `IncludeAnonymous` iteration mode.
+
+The optional arguments to `enter` tree traversal methods were replaced with a single `mode` argument.
+
+`Tree.iterate` now passes node objects, rather than type/from/to as separate arguments, to its callback functions.
+
+### New features
+
+The new `SyntaxNodeRef` type provides an interface shared by `SyntaxNode` and `TreeCursor`.
+
+`TreeCursor` instances now how have an `iterate` method that calls a function for each descendant of the current node.
+
+The new `matchContext` method on `SyntaxNode` and `TreeCursor` provides a convenient way to match the names of direct parent nodes.
+
+Cursors can now be passed flags to control their behavior.
+
 ## 0.15.12 (2022-03-18)
 
 ### Bug fixes
