@@ -631,6 +631,8 @@ export interface SyntaxNodeRef {
   /// Retrieve a stable [syntax node](#common.SyntaxNode) at this
   /// position.
   readonly node: SyntaxNode
+  /// Test whether the node matches a given context.
+  matchContext(context: readonly string[]): boolean
 }
 
 /// A syntax node provides an immutable pointer to a given node in a
