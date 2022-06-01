@@ -824,14 +824,14 @@ export class TreeNode implements SyntaxNode {
     return val
   }
 
-  get parent() {
+  get parent(): TreeNode | null {
     return this._parent ? this._parent.nextSignificantParent() : null
   }
 
-  get nextSibling() {
+  get nextSibling(): SyntaxNode | null {
     return this._parent && this.index >= 0 ? this._parent.nextChild(this.index + 1, 1, 0, Side.DontCare) : null
   }
-  get prevSibling() {
+  get prevSibling(): SyntaxNode | null {
     return this._parent && this.index >= 0 ? this._parent.nextChild(this.index - 1, -1, 0, Side.DontCare) : null
   }
 
@@ -931,7 +931,7 @@ class BufferNode implements SyntaxNode {
     return index < 0 ? null : new BufferNode(this.context, this, index)
   }
 
-  get parent() {
+  get parent(): SyntaxNode | null {
     return this._parent || this.context.parent.nextSignificantParent()
   }
 
