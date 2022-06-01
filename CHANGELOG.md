@@ -1,3 +1,9 @@
+## 0.16.1 (2022-06-01)
+
+### Bug fixes
+
+Declare `matchContext` as a property of `SytaxNodeRef`.
+
 ## 0.16.0 (2022-04-20)
 
 ### Breaking changes
