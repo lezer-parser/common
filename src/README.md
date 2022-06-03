@@ -58,8 +58,7 @@ Buffers are an optimization in the way Lezer trees are stored.
 ### Incremental Parsing
 
 Efficient reparsing happens by reusing parts of the original parsed
-structure. This data structure tracks trees from previous parses along
-with some metadata that tells us which parts can be safely reused.
+structure.
 
 @TreeFragment
 

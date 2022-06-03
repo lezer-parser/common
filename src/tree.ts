@@ -3,7 +3,7 @@ import {Parser} from "./parse"
 // FIXME profile adding a per-Tree TreeNode cache, validating it by
 // parent pointer
 
-/// The default maximum length of a `TreeBuffer` node (1024).
+/// The default maximum length of a `TreeBuffer` node.
 export const DefaultBufferLength = 1024
 
 let nextPropID = 0
@@ -30,8 +30,10 @@ export class NodeProp<T> {
 
   /// Create a new node prop type.
   constructor(config: {
-    /// The [deserialize](#common.NodeProp.deserialize) function to use
-    /// for this prop. Defaults to a funciton that raises an error.
+    /// The [deserialize](#common.NodeProp.deserialize) function to
+    /// use for this prop, used for example when directly providing
+    /// the prop from a grammar file. Defaults to a function that
+    /// raises an error.
     deserialize?: (str: string) => T,
     /// By default, node props are stored in the [node
     /// type](#common.NodeType). It can sometimes be useful to directly
@@ -92,7 +94,7 @@ export class NodeProp<T> {
 
   /// This per-node prop is used to replace a given node, or part of a
   /// node, with another tree. This is useful to include trees from
-  /// different languages.
+  /// different languages in mixed-language parsers.
   static mounted = new NodeProp<MountedTree>({perNode: true})
 }
 
@@ -148,6 +150,7 @@ export class NodeType {
     /// @internal
     readonly flags: number = 0) {}
 
+  /// Define a node type.
   static define(spec: {
     /// The ID of the node type. When this type is used in a
     /// [set](#common.NodeSet), the ID must correspond to its index in
@@ -251,7 +254,7 @@ export class NodeSet {
   }
 
   /// Create a copy of this set with some node properties added. The
-  /// arguments to this method should be created with
+  /// arguments to this method can be created with
   /// [`NodeProp.add`](#common.NodeProp.add).
   extend(...props: NodePropSource[]): NodeSet {
     let newTypes: NodeType[] = []
@@ -483,7 +486,7 @@ type BuildData = {
   buffer: BufferCursor | readonly number[],
   /// The node types to use.
   nodeSet: NodeSet,
-  /// The id of the top node type, if any.
+  /// The id of the top node type.
   topID: number,
   /// The position the tree should start at. Defaults to 0.
   start?: number,
@@ -545,7 +548,7 @@ class FlatBufferCursor implements BufferCursor {
 /// Tree buffers contain (type, start, end, endIndex) quads for each
 /// node. In such a buffer, nodes are stored in prefix order (parents
 /// before children, with the endIndex of the parent indicating which
-/// children belong to it)
+/// children belong to it).
 export class TreeBuffer {
   /// Create a tree buffer.
   constructor(
@@ -614,7 +617,7 @@ export class TreeBuffer {
 /// The set of properties provided by both [`SyntaxNode`](#common.SyntaxNode)
 /// and [`TreeCursor`](#common.TreeCursor). Note that, if you need
 /// an object that is guaranteed to stay stable in the future, you
-/// need to use the [\`node\`](#common.SyntaxNodeRef.node) accessor.
+/// need to use the [`node`](#common.SyntaxNodeRef.node) accessor.
 export interface SyntaxNodeRef {
   /// The start position of the node.
   readonly from: number

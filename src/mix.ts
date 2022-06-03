@@ -33,11 +33,6 @@ export interface NestedParse {
 /// function, runs the resulting [inner parses](#common.NestedParse),
 /// and then [mounts](#common.NodeProp^mounted) their results onto the
 /// tree.
-///
-/// The nesting function is passed a cursor to provide context for a
-/// node, but _should not_ move that cursor, only inspect its
-/// properties and optionally access its
-/// [node object](#common.TreeCursor.node).
 export function parseMixed(nest: (node: SyntaxNodeRef, input: Input) => NestedParse | null): ParseWrapper {
   return (parse, input, fragments, ranges): PartialParse => new MixedParse(parse, nest, input, fragments, ranges)
 }

@@ -26,7 +26,10 @@ export class TreeFragment {
   /// @internal
   open: Open
 
-  /// Construct a tree fragment.
+  /// Construct a tree fragment. You'll usually want to use
+  /// [`addTree`](#common.TreeFragment^addTree) and
+  /// [`applyChanges`](#common.TreeFragment^applyChanges) instead of
+  /// calling this directly.
   constructor(
     /// The start of the unchanged range pointed to by this fragment.
     /// This refers to an offset in the _updated_ document (as opposed
@@ -113,8 +116,9 @@ export interface PartialParse {
   /// `advance` will return a tree when the parse has reached the
   /// position. Note that, depending on the parser algorithm and the
   /// state of the parse when `stopAt` was called, that tree may
-  /// contain nodes beyond the position. It is not allowed to call
-  /// `stopAt` a second time with a higher position.
+  /// contain nodes beyond the position. It is an error to call
+  /// `stopAt` with a higher position than it's [current
+  /// value](#common.PartialParse.stoppedAt).
   stopAt(pos: number): void
 
   /// Reports whether `stopAt` has been called on this parse.
