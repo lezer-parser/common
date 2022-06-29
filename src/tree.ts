@@ -384,6 +384,10 @@ export class Tree {
   /// position. If 1, it'll move into nodes that start at the
   /// position. With 0, it'll only enter nodes that cover the position
   /// from both sides.
+  ///
+  /// Note that this will not enter
+  /// [overlays](#common.MountedTree.overlay), and you often want
+  /// [`resolveInner`](#common.Tree.resolveInner) instead.
   resolve(pos: number, side: -1 | 0 | 1 = 0) {
     let node = resolveNode(CachedNode.get(this) || this.topNode, pos, side, false)
     CachedNode.set(this, node)
