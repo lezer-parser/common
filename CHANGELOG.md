@@ -1,3 +1,9 @@
+## 1.0.1 (2022-08-30)
+
+### Bug fixes
+
+Fix a bug that could cause incremental parsing to incorrectly reuse nodes inside nested mixed parses.
+
 ## 1.0.0 (2022-06-06)
 
 ### New features
