@@ -409,12 +409,14 @@ function enterFragments(mounts: readonly ReusableMount[], ranges: readonly {from
       for (let i = 0, pos = from;; i++) {
         let last = i == changes.length, end = last ? to : changes[i].from
         if (end > pos)
-          result.push(new TreeFragment(pos, end, mount.tree, -startPos, frag.from >= pos, frag.to <= end))
+          result.push(new TreeFragment(pos, end, mount.tree, -startPos,
+                                       frag.from >= pos || frag.openStart, frag.to <= end || frag.openEnd))
         if (last) break
         pos = changes[i].to
       }
     } else {
-      result.push(new TreeFragment(from, to, mount.tree, -startPos, frag.from >= startPos, frag.to <= endPos))
+      result.push(new TreeFragment(from, to, mount.tree, -startPos,
+                                   frag.from >= startPos || frag.openStart, frag.to <= endPos || frag.openEnd))
     }
   }
   return result
