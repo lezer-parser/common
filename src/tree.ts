@@ -1182,7 +1182,7 @@ export class TreeCursor implements SyntaxNodeRef {
   }
 
   /// Move to the next node in a
-  /// [pre-order](https://en.wikipedia.org/wiki/Tree_traversal#Pre-order_(NLR))
+  /// [pre-order](https://en.wikipedia.org/wiki/Tree_traversal#Pre-order,_NLR)
   /// traversal, going from a node to its first child or, if the
   /// current node is empty or `enter` is false, its next sibling or
   /// the next sibling of the first parent node that has one.
