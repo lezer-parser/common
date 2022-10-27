@@ -64,7 +64,7 @@ structure.
 
 @ChangedRange
 
-### Mixed-Language Parsing
+### Mixed Parsing
 
 @parseMixed
 
