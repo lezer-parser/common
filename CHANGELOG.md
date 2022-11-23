@@ -1,3 +1,9 @@
+## 1.0.2 (2022-11-23)
+
+### Bug fixes
+
+Fix a bug in mixed parsing that would sometimes produce invalid trees.
+
 ## 1.0.1 (2022-08-30)
 
 ### Bug fixes
