@@ -605,16 +605,17 @@ export class TreeBuffer {
   }
 
   /// @internal
-  slice(startI: number, endI: number, from: number, to: number) {
+  slice(startI: number, endI: number, from: number) {
     let b = this.buffer
-    let copy = new Uint16Array(endI - startI)
+    let copy = new Uint16Array(endI - startI), len = 0
     for (let i = startI, j = 0; i < endI;) {
       copy[j++] = b[i++]
       copy[j++] = b[i++] - from
-      copy[j++] = b[i++] - from
+      let to = copy[j++] = b[i++] - from
       copy[j++] = b[i++] - startI
+      len = Math.max(len, to)
     }
-    return new TreeBuffer(copy, to - from, this.set)
+    return new TreeBuffer(copy, len, this.set)
   }
 }
 
@@ -970,8 +971,8 @@ class BufferNode implements SyntaxNode {
     let {buffer} = this.context
     let startI = this.index + 4, endI = buffer.buffer[this.index + 3]
     if (endI > startI) {
-      let from = buffer.buffer[this.index + 1], to = buffer.buffer[this.index + 2]
-      children.push(buffer.slice(startI, endI, from, to))
+      let from = buffer.buffer[this.index + 1]
+      children.push(buffer.slice(startI, endI, from))
       positions.push(0)
     }
     return new Tree(this.type, children, positions, this.to - this.from)

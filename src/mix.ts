@@ -211,8 +211,8 @@ function checkCover(covered: readonly {from: number, to: number}[], from: number
 // TreeBuffer.
 function sliceBuf(buf: TreeBuffer, startI: number, endI: number, nodes: (Tree | TreeBuffer)[], positions: number[], off: number) {
   if (startI < endI) {
-    let from = buf.buffer[startI + 1], to = buf.buffer[endI - 2]
-    nodes.push(buf.slice(startI, endI, from, to))
+    let from = buf.buffer[startI + 1]
+    nodes.push(buf.slice(startI, endI, from))
     positions.push(from - off)
   }
 }
