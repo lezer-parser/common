@@ -44,7 +44,10 @@ class InnerParse {
     readonly overlay: readonly {from: number, to: number}[] | null,
     readonly target: Tree,
     readonly ranges: readonly {from: number, to: number}[],
-  ) {}
+  ) {
+    if (!ranges.length || ranges.some(r => r.from >= r.to))
+      throw new RangeError("Invalid inner parse ranges given: " + JSON.stringify(ranges))
+  }
 }
 
 class ActiveOverlay {
