@@ -1,3 +1,9 @@
+## 1.0.3 (2023-06-02)
+
+### Bug fixes
+
+`Tree.iterate` now properly includes anonymous nodes when `IterMode.IncludeAnonymous` is enabled.
+
 ## 1.0.2 (2022-11-23)
 
 ### Bug fixes
