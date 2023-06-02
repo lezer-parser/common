@@ -66,7 +66,7 @@ export class TreeFragment {
   /// true, the parse is treated as incomplete, and the resulting
   /// fragment has [`openEnd`](#common.TreeFragment.openEnd) set to
   /// true.
-  static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false) {
+  static addTree(tree: Tree, fragments: readonly TreeFragment[] = [], partial = false): readonly TreeFragment[] {
     let result = [new TreeFragment(0, tree.length, tree, 0, false, partial)]
     for (let f of fragments) if (f.to > tree.length) result.push(f)
     return result
