@@ -358,14 +358,14 @@ export class Tree {
   /// Get a [tree cursor](#common.TreeCursor) positioned at the top of
   /// the tree. Mode can be used to [control](#common.IterMode) which
   /// nodes the cursor visits.
-  cursor(mode: IterMode = 0) {
+  cursor(mode: IterMode = 0 as IterMode) {
     return new TreeCursor(this.topNode as TreeNode, mode)
   }
 
   /// Get a [tree cursor](#common.TreeCursor) pointing into this tree
   /// at the given position and side (see
   /// [`moveTo`](#common.TreeCursor.moveTo).
-  cursorAt(pos: number, side: -1 | 0 | 1 = 0, mode: IterMode = 0): TreeCursor {
+  cursorAt(pos: number, side: -1 | 0 | 1 = 0, mode: IterMode = 0 as IterMode): TreeCursor {
     let scope = CachedNode.get(this) || this.topNode
     let cursor = new TreeCursor(scope as TreeNode | BufferNode)
     cursor.moveTo(pos, side)
@@ -781,7 +781,7 @@ export class TreeNode implements SyntaxNode {
 
   get to() { return this.from + this._tree.length }
 
-  nextChild(i: number, dir: 1 | -1, pos: number, side: Side, mode: IterMode = 0): TreeNode | BufferNode | null {
+  nextChild(i: number, dir: 1 | -1, pos: number, side: Side, mode: IterMode = 0 as IterMode): TreeNode | BufferNode | null {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent._tree, e = dir > 0 ? children.length : -1; i != e; i += dir) {
         let next = children[i], start = positions[i] + parent.from
@@ -844,7 +844,7 @@ export class TreeNode implements SyntaxNode {
     return this._parent && this.index >= 0 ? this._parent.nextChild(this.index - 1, -1, 0, Side.DontCare) : null
   }
 
-  cursor(mode: IterMode = 0) { return new TreeCursor(this, mode) }
+  cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this, mode) }
 
   get tree() { return this._tree }
 
@@ -933,7 +933,7 @@ class BufferNode implements SyntaxNode {
   childAfter(pos: number) { return this.child(1, pos, Side.After) }
   childBefore(pos: number) { return this.child(-1, pos, Side.Before) }
 
-  enter(pos: number, side: -1 | 0 | 1, mode: IterMode = 0) {
+  enter(pos: number, side: -1 | 0 | 1, mode: IterMode = 0 as IterMode) {
     if (mode & IterMode.ExcludeBuffers) return null
     let {buffer} = this.context
     let index = buffer.findChild(this.index + 4, buffer.buffer[this.index + 3], side > 0 ? 1 : -1, pos - this.context.start, side)
@@ -963,7 +963,7 @@ class BufferNode implements SyntaxNode {
     return new BufferNode(this.context, this._parent, buffer.findChild(parentStart, this.index, -1, 0, Side.DontCare))
   }
 
-  cursor(mode: IterMode = 0) { return new TreeCursor(this, mode) }
+  cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this, mode) }
 
   get tree() { return null }
 
