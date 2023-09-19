@@ -116,6 +116,11 @@ export class MountedTree {
     /// The parser used to create this subtree.
     readonly parser: Parser
   ) {}
+
+  /// @internal
+  static get(tree: Tree | null): MountedTree | null {
+    return tree && tree.props && tree.props[NodeProp.mounted.id]
+  }
 }
 
 /// Type returned by [`NodeProp.add`](#common.NodeProp.add). Describes
@@ -337,7 +342,7 @@ export class Tree {
 
   /// @internal
   toString(): string {
-    let mounted = this.prop(NodeProp.mounted)
+    let mounted = MountedTree.get(this)
     if (mounted && !mounted.overlay) return mounted.tree.toString()
     let children = ""
     for (let ch of this.children) {
@@ -405,6 +410,15 @@ export class Tree {
     return node
   }
 
+  /// In some situations, it can be useful to iterate through all
+  /// nodes around a position, including those in overlays that don't
+  /// directly cover the position. This method gives you an iterator
+  /// that will produce all nodes, from small to big, around the given
+  /// position.
+  resolveStack(pos: number, side: -1 | 0 | 1 = 0): NodeIterator {
+    return stackIterator(this, pos, side)
+  }
+
   /// Iterate over the tree and its children, calling `enter` for any
   /// node that touches the `from`/`to` region (if given) before
   /// running over such a node's children, and `leave` (if given) when
@@ -466,6 +480,9 @@ export class Tree {
   /// or a cursor over such a buffer.
   static build(data: BuildData) { return buildTree(data) }
 }
+
+/// Represents a sequence of nodes.
+export type NodeIterator = {node: SyntaxNode, next: NodeIterator | null}
 
 type BuildData = {
   /// The buffer or buffer cursor to read the node data from.
@@ -766,7 +783,7 @@ abstract class BaseNode implements SyntaxNode {
   abstract prevSibling: SyntaxNode | null
   abstract toTree(): Tree
 
-  cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this, mode) }
+  cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this as any, mode) }
 
   getChild(type: string | number, before: string | number | null = null, after: string | number | null = null) {
     let r = getChildren(this, type, before, after)
@@ -805,6 +822,8 @@ abstract class BaseNode implements SyntaxNode {
   }
 
   get node() { return this }
+
+  get next() { return this.parent }
 }
 
 export class TreeNode extends BaseNode implements SyntaxNode {
@@ -831,8 +850,7 @@ export class TreeNode extends BaseNode implements SyntaxNode {
           if (index > -1) return new BufferNode(new BufferContext(parent, next, i, start), null, index)
         } else if ((mode & IterMode.IncludeAnonymous) || (!next.type.isAnonymous || hasChild(next))) {
           let mounted
-          if (!(mode & IterMode.IgnoreMounts) &&
-              next.props && (mounted = next.prop(NodeProp.mounted)) && !mounted.overlay)
+          if (!(mode & IterMode.IgnoreMounts) && (mounted = MountedTree.get(next)) && !mounted.overlay)
             return new TreeNode(mounted.tree, start, i, parent)
           let inner = new TreeNode(next, start, i, parent)
           return (mode & IterMode.IncludeAnonymous) || !inner.type.isAnonymous ? inner
@@ -855,7 +873,7 @@ export class TreeNode extends BaseNode implements SyntaxNode {
 
   enter(pos: number, side: -1 | 0 | 1, mode = 0) {
     let mounted
-    if (!(mode & IterMode.IgnoreOverlays) && (mounted = this._tree.prop(NodeProp.mounted)) && mounted.overlay) {
+    if (!(mode & IterMode.IgnoreOverlays) && (mounted = MountedTree.get(this._tree)) && mounted.overlay) {
       let rPos = pos - this.from
       for (let {from, to} of mounted.overlay) {
         if ((side > 0 ? from <= rPos : from < rPos) &&
@@ -994,6 +1012,48 @@ class BufferNode extends BaseNode {
 
   /// @internal
   toString() { return this.context.buffer.childString(this.index) }
+}
+
+function iterStack(heads: readonly SyntaxNode[]): NodeIterator | null {
+  if (!heads.length) return null
+  if (heads.length == 1) return heads[0] as any
+
+  let pick = 0, picked = heads[0]
+  for (let i = 1; i < heads.length; i++) {
+    let node = heads[i]
+    if (node.from > picked.from || node.to < picked.to) { picked = node; pick = i }
+  }
+  let next = picked instanceof TreeNode && picked.index < 0 ? null : picked.parent
+  let newHeads = heads.slice()
+  if (next) newHeads[pick] = next
+  else newHeads.splice(pick, 1)
+  return new StackIterator(newHeads, picked)
+}
+
+class StackIterator implements NodeIterator {
+  constructor(readonly heads: readonly SyntaxNode[],
+              readonly node: SyntaxNode) {}
+  get next() { return iterStack(this.heads) }
+}
+
+function stackIterator(tree: Tree, pos: number, side: -1 | 0 | 1): NodeIterator {
+  let inner = tree.resolveInner(pos, side), layers: SyntaxNode[] | null = null
+  for (let scan: TreeNode | null = inner instanceof TreeNode ? inner : (inner as BufferNode).context.parent;
+       scan; scan = scan.parent) {
+    if (scan.index < 0) { // This is an overlay root
+      let parent: TreeNode | null = scan.parent!
+      ;(layers || (layers = [inner])).push(parent.resolve(pos, side))
+      scan = parent
+    } else {
+      let mount = MountedTree.get(scan.tree)
+      // Relevant overlay branching off
+      if (mount && mount.overlay && mount.overlay[0].from <= pos && mount.overlay[mount.overlay.length - 1].to >= pos) {
+        let root = new TreeNode(mount.tree, mount.overlay[0].from + scan.from, 0, null)
+        ;(layers || (layers = [inner])).push(resolveNode(root, pos, side, false))
+      }
+    }
+  }
+  return layers ? iterStack(layers) : inner as any
 }
 
 /// A tree cursor object focuses on a given node in a syntax tree, and

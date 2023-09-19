@@ -19,6 +19,8 @@ cheap to store.
 
 @SyntaxNode
 
+@NodeIterator
+
 @TreeCursor
 
 @IterMode
