@@ -640,7 +640,9 @@ export interface SyntaxNodeRef {
   /// Retrieve a stable [syntax node](#common.SyntaxNode) at this
   /// position.
   readonly node: SyntaxNode
-  /// Test whether the node matches a given context.
+  /// Test whether the node matches a given context—a sequence of
+  /// direct parent nodes. Empty strings in the context array act as
+  /// wildcards, other strings must match the ancestor node's name.
   matchContext(context: readonly string[]): boolean
 }
 
@@ -704,11 +706,6 @@ export interface SyntaxNode extends SyntaxNodeRef {
   /// Like [`getChild`](#common.SyntaxNode.getChild), but return all
   /// matching children, not just the first.
   getChildren(type: string | number, before?: string | number | null, after?: string | number | null): SyntaxNode[]
-
-  /// Test whether the node matches a given context—a sequence of
-  /// direct parent nodes. Empty strings in the context array act as
-  /// wildcards, other strings must match the ancestor node's name.
-  matchContext(context: readonly string[]): boolean
 }
 
 const enum Side {
@@ -729,21 +726,6 @@ function checkSide(side: Side, pos: number, from: number, to: number) {
     case Side.After: return to > pos
     case Side.DontCare: return true
   }
-}
-
-function enterUnfinishedNodesBefore(node: SyntaxNode, pos: number) {
-  let scan = node.childBefore(pos)
-  while (scan) {
-    let last = scan.lastChild
-    if (!last || last.to != scan.to) break
-    if (last.type.isError && last.from == last.to) {
-      node = scan
-      scan = last.prevSibling
-    } else {
-      scan = last
-    }
-  }
-  return node
 }
 
 function resolveNode(node: SyntaxNode, pos: number, side: -1 | 0 | 1, overlays: boolean): SyntaxNode {
@@ -768,12 +750,69 @@ function resolveNode(node: SyntaxNode, pos: number, side: -1 | 0 | 1, overlays: 
   }
 }
 
-export class TreeNode implements SyntaxNode {
+abstract class BaseNode implements SyntaxNode {
+  abstract from: number
+  abstract to: number
+  abstract type: NodeType
+  abstract name: string
+  abstract tree: Tree | null
+  abstract parent: SyntaxNode | null
+  abstract firstChild: SyntaxNode | null
+  abstract lastChild: SyntaxNode | null
+  abstract childAfter(pos: number): SyntaxNode | null
+  abstract childBefore(pos: number): SyntaxNode | null
+  abstract enter(pos: number, side: -1 | 0 | 1, mode?: IterMode): SyntaxNode | null
+  abstract nextSibling: SyntaxNode | null
+  abstract prevSibling: SyntaxNode | null
+  abstract toTree(): Tree
+
+  cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this, mode) }
+
+  getChild(type: string | number, before: string | number | null = null, after: string | number | null = null) {
+    let r = getChildren(this, type, before, after)
+    return r.length ? r[0] : null
+  }
+
+  getChildren(type: string | number, before: string | number | null = null, after: string | number | null = null): SyntaxNode[] {
+    return getChildren(this, type, before, after)
+  }
+
+  resolve(pos: number, side: -1 | 0 | 1 = 0): SyntaxNode {
+    return resolveNode(this, pos, side, false)
+  }
+
+  resolveInner(pos: number, side: -1 | 0 | 1 = 0): SyntaxNode {
+    return resolveNode(this, pos, side, true)
+  }
+
+  matchContext(context: readonly string[]): boolean {
+    return matchNodeContext(this, context)
+  }
+
+  enterUnfinishedNodesBefore(pos: number) {
+    let scan = this.childBefore(pos), node: SyntaxNode = this
+    while (scan) {
+      let last = scan.lastChild
+      if (!last || last.to != scan.to) break
+      if (last.type.isError && last.from == last.to) {
+        node = scan
+        scan = last.prevSibling
+      } else {
+        scan = last
+      }
+    }
+    return node
+  }
+
+  get node() { return this }
+}
+
+export class TreeNode extends BaseNode implements SyntaxNode {
   constructor(readonly _tree: Tree,
               readonly from: number,
               // Index in parent node, set to -1 if the node is not a direct child of _parent.node (overlay)
               readonly index: number,
-              readonly _parent: TreeNode | null) {}
+              readonly _parent: TreeNode | null) { super() }
 
   get type() { return this._tree.type }
 
@@ -844,37 +883,12 @@ export class TreeNode implements SyntaxNode {
     return this._parent && this.index >= 0 ? this._parent.nextChild(this.index - 1, -1, 0, Side.DontCare) : null
   }
 
-  cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this, mode) }
-
   get tree() { return this._tree }
 
   toTree() { return this._tree }
 
-  resolve(pos: number, side: -1 | 0 | 1 = 0) {
-    return resolveNode(this, pos, side, false)
-  }
-
-  resolveInner(pos: number, side: -1 | 0 | 1 = 0) {
-    return resolveNode(this, pos, side, true)
-  }
-
-  enterUnfinishedNodesBefore(pos: number) { return enterUnfinishedNodesBefore(this, pos) }
-
-  getChild(type: string | number, before: string | number | null = null, after: string | number | null = null) {
-    let r = getChildren(this, type, before, after)
-    return r.length ? r[0] : null
-  }
-
-  getChildren(type: string | number, before: string | number | null = null, after: string | number | null = null) {
-    return getChildren(this, type, before, after)
-  }
-
   /// @internal
   toString() { return this._tree.toString() }
-
-  get node() { return this }
-
-  matchContext(context: readonly string[]): boolean { return matchNodeContext(this, context) }
 }
 
 function getChildren(node: SyntaxNode, type: string | number, before: string | number | null, after: string | number | null): SyntaxNode[] {
@@ -906,7 +920,7 @@ class BufferContext {
               readonly start: number) {}
 }
 
-class BufferNode implements SyntaxNode {
+class BufferNode extends BaseNode {
   type: NodeType
 
   get name() { return this.type.name }
@@ -918,6 +932,7 @@ class BufferNode implements SyntaxNode {
   constructor(readonly context: BufferContext,
               readonly _parent: BufferNode | null,
               readonly index: number) {
+    super()
     this.type = context.buffer.set.types[context.buffer.buffer[index]]
   }
 
@@ -963,8 +978,6 @@ class BufferNode implements SyntaxNode {
     return new BufferNode(this.context, this._parent, buffer.findChild(parentStart, this.index, -1, 0, Side.DontCare))
   }
 
-  cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this, mode) }
-
   get tree() { return null }
 
   toTree() {
@@ -979,31 +992,8 @@ class BufferNode implements SyntaxNode {
     return new Tree(this.type, children, positions, this.to - this.from)
   }
 
-  resolve(pos: number, side: -1 | 0 | 1 = 0) {
-    return resolveNode(this, pos, side, false)
-  }
-
-  resolveInner(pos: number, side: -1 | 0 | 1 = 0) {
-    return resolveNode(this, pos, side, true)
-  }
-
-  enterUnfinishedNodesBefore(pos: number) { return enterUnfinishedNodesBefore(this, pos) }
-
   /// @internal
   toString() { return this.context.buffer.childString(this.index) }
-
-  getChild(type: string | number, before: string | number | null = null, after: string | number | null = null) {
-    let r = getChildren(this, type, before, after)
-    return r.length ? r[0] : null
-  }
-
-  getChildren(type: string | number, before: string | number | null = null, after: string | number | null = null) {
-    return getChildren(this, type, before, after)
-  }
-
-  get node() { return this }
-
-  matchContext(context: readonly string[]): boolean { return matchNodeContext(this, context) }
 }
 
 /// A tree cursor object focuses on a given node in a syntax tree, and
