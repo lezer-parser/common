@@ -1013,8 +1013,6 @@ class BufferNode extends BaseNode {
 
 function iterStack(heads: readonly SyntaxNode[]): NodeIterator | null {
   if (!heads.length) return null
-  if (heads.length == 1) return heads[0] as any
-
   let pick = 0, picked = heads[0]
   for (let i = 1; i < heads.length; i++) {
     let node = heads[i]
@@ -1045,7 +1043,7 @@ function stackIterator(tree: Tree, pos: number, side: -1 | 0 | 1): NodeIterator 
       let mount = MountedTree.get(scan.tree)
       // Relevant overlay branching off
       if (mount && mount.overlay && mount.overlay[0].from <= pos && mount.overlay[mount.overlay.length - 1].to >= pos) {
-        let root = new TreeNode(mount.tree, mount.overlay[0].from + scan.from, 0, scan)
+        let root = new TreeNode(mount.tree, mount.overlay[0].from + scan.from, -1, scan)
         ;(layers || (layers = [inner])).push(resolveNode(root, pos, side, false))
       }
     }
