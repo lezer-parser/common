@@ -1,3 +1,9 @@
+## 1.1.0 (2023-09-19)
+
+### New features
+
+The new `Tree.resolveStack` method returns an iterator through the nodes covering a position, including those from  overlays not active at that point.
+
 ## 1.0.4 (2023-08-17)
 
 ### Bug fixes
