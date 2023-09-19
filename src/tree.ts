@@ -1,8 +1,5 @@
 import {Parser} from "./parse"
 
-// FIXME profile adding a per-Tree TreeNode cache, validating it by
-// parent pointer
-
 /// The default maximum length of a `TreeBuffer` node.
 export const DefaultBufferLength = 1024
 
