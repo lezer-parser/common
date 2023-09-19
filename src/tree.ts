@@ -1045,7 +1045,7 @@ function stackIterator(tree: Tree, pos: number, side: -1 | 0 | 1): NodeIterator 
       let mount = MountedTree.get(scan.tree)
       // Relevant overlay branching off
       if (mount && mount.overlay && mount.overlay[0].from <= pos && mount.overlay[mount.overlay.length - 1].to >= pos) {
-        let root = new TreeNode(mount.tree, mount.overlay[0].from + scan.from, 0, null)
+        let root = new TreeNode(mount.tree, mount.overlay[0].from + scan.from, 0, scan)
         ;(layers || (layers = [inner])).push(resolveNode(root, pos, side, false))
       }
     }
