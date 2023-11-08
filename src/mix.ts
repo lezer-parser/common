@@ -43,11 +43,13 @@ class InnerParse {
     readonly parse: PartialParse,
     readonly overlay: readonly {from: number, to: number}[] | null,
     readonly target: Tree,
-    readonly ranges: readonly {from: number, to: number}[],
-  ) {
-    if (!ranges.length || ranges.some(r => r.from >= r.to))
-      throw new RangeError("Invalid inner parse ranges given: " + JSON.stringify(ranges))
-  }
+    readonly from: number
+  ) {}
+}
+
+function checkRanges(ranges: readonly {from: number, to: number}[]) {
+  if (!ranges.length || ranges.some(r => r.from >= r.to))
+    throw new RangeError("Invalid inner parse ranges given: " + JSON.stringify(ranges))
 }
 
 class ActiveOverlay {
@@ -120,7 +122,7 @@ class MixedParse implements PartialParse {
     if (this.baseParse) return 0
     let pos = this.input.length
     for (let i = this.innerDone; i < this.inner.length; i++) {
-      if (this.inner[i].ranges[0].from < pos)
+      if (this.inner[i].from < pos)
         pos = Math.min(pos, this.inner[i].parse.parsedPos)
     }
     return pos
@@ -152,7 +154,8 @@ class MixedParse implements PartialParse {
         enter = false
       } else if (covered && (isCovered = checkCover(covered.ranges, cursor.from, cursor.to))) {
         enter = isCovered != Cover.Full
-      } else if (!cursor.type.isAnonymous && cursor.from < cursor.to && (nest = this.nest(cursor, this.input))) {
+      } else if (!cursor.type.isAnonymous && (nest = this.nest(cursor, this.input)) &&
+                 (cursor.from < cursor.to || !nest.overlay)) {
         if (!cursor.tree) materialize(cursor)
 
         let oldMounts = fragmentCursor.findMounts(cursor.from, nest.parser)
@@ -160,13 +163,16 @@ class MixedParse implements PartialParse {
           overlay = new ActiveOverlay(nest.parser, nest.overlay, oldMounts, this.inner.length,
                                       cursor.from, cursor.tree!,  overlay)
         } else {
-          let ranges = punchRanges(this.ranges, nest.overlay || [new Range(cursor.from, cursor.to)])
-          if (ranges.length) this.inner.push(new InnerParse(
+          let ranges = punchRanges(this.ranges, nest.overlay ||
+            (cursor.from < cursor.to ? [new Range(cursor.from, cursor.to)] : []))
+          if (ranges.length) checkRanges(ranges)
+          if (ranges.length || !nest.overlay) this.inner.push(new InnerParse(
             nest.parser,
-            nest.parser.startParse(this.input, enterFragments(oldMounts, ranges), ranges),
+            ranges.length ? nest.parser.startParse(this.input, enterFragments(oldMounts, ranges), ranges)
+              : nest.parser.startParse(""),
             nest.overlay ? nest.overlay.map(r => new Range(r.from - cursor.from, r.to - cursor.from)) : null,
             cursor.tree!,
-            ranges,
+            ranges.length ? ranges[0].from : cursor.from,
           ))
           if (!nest.overlay) enter = false
           else if (ranges.length) covered = {ranges, depth: 0, prev: covered}
@@ -184,13 +190,16 @@ class MixedParse implements PartialParse {
           if (!cursor.parent()) break scan
           if (overlay && !--overlay.depth) {
             let ranges = punchRanges(this.ranges, overlay.ranges)
-            if (ranges.length) this.inner.splice(overlay.index, 0, new InnerParse(
-              overlay.parser,
-              overlay.parser.startParse(this.input, enterFragments(overlay.mounts, ranges), ranges),
-              overlay.ranges.map(r => new Range(r.from - overlay!.start, r.to - overlay!.start)),
-              overlay.target,
-              ranges
-            ))
+            if (ranges.length) {
+              checkRanges(ranges)
+              this.inner.splice(overlay.index, 0, new InnerParse(
+                overlay.parser,
+                overlay.parser.startParse(this.input, enterFragments(overlay.mounts, ranges), ranges),
+                overlay.ranges.map(r => new Range(r.from - overlay!.start, r.to - overlay!.start)),
+                overlay.target,
+                ranges[0].from
+              ))
+            }
             overlay = overlay.prev
           }
           if (covered && !--covered.depth) covered = covered.prev
