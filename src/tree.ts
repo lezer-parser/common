@@ -1110,7 +1110,8 @@ export class TreeCursor implements SyntaxNodeRef {
     return true
   }
 
-  private yield(node: TreeNode | BufferNode | null) {
+  /// @internal
+  yield(node: TreeNode | BufferNode | null) {
     if (!node) return false
     if (node instanceof TreeNode) {
       this.buffer = null

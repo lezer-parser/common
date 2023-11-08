@@ -226,34 +226,39 @@ function sliceBuf(buf: TreeBuffer, startI: number, endI: number, nodes: (Tree | 
 // parse that was ran via the mix parser, and thus aren't shared with
 // any other code, making violations of the immutability safe.
 function materialize(cursor: TreeCursor) {
-  let {node} = cursor, depth = 0
+  let {node} = cursor, stack: number[] = []
   // Scan up to the nearest tree
-  do { cursor.parent(); depth++ } while (!cursor.tree)
+  do { stack.push(cursor.index); cursor.parent() } while (!cursor.tree)
   // Find the index of the buffer in that tree
   let i = 0, base = cursor.tree!, off = 0
   for (;; i++) {
     off = base.positions[i] + cursor.from
     if (off <= node.from && off + base.children[i].length >= node.to) break
   }
-  let buf = base.children[i] as TreeBuffer, b = buf.buffer
+  let buf = base.children[i] as TreeBuffer, b = buf.buffer, newStack: number[] = [i]
   // Split a level in the buffer, putting the nodes before and after
   // the child that contains `node` into new buffers.
-  function split(startI: number, endI: number, type: NodeType, innerOffset: number, length: number): Tree {
-    let i = startI
-    while (b[i + 2] + off <= node.from) i = b[i + 3]
+  function split(startI: number, endI: number, type: NodeType, innerOffset: number, length: number, stackPos: number): Tree {
+    let targetI = stack[stackPos]
     let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
-    sliceBuf(buf, startI, i, children, positions, innerOffset)
-    let from = b[i + 1], to = b[i + 2]
-    let isTarget = from + off == node.from && to + off == node.to && b[i] == node.type.id
-    children.push(isTarget ? node.toTree() : split(i + 4, b[i + 3], buf.set.types[b[i]], from, to - from))
+    sliceBuf(buf, startI, targetI, children, positions, innerOffset)
+    let from = b[targetI + 1], to = b[targetI + 2]
+    newStack.push(children.length)
+    let child = stackPos
+      ? split(targetI + 4, b[targetI + 3], buf.set.types[b[targetI]], from, to - from, stackPos - 1)
+      : node.toTree()
+    children.push(child)
     positions.push(from - innerOffset)
-    sliceBuf(buf, b[i + 3], endI, children, positions, innerOffset)
+    sliceBuf(buf, b[targetI + 3], endI, children, positions, innerOffset)
     return new Tree(type, children, positions, length)
   }
   // Overwrite (!) the child at the buffer's index with the split-up tree
-  ;(base.children as any)[i] = split(0, b.length, NodeType.none, 0, buf.length)
+  ;(base.children as any)[i] = split(0, b.length, NodeType.none, 0, buf.length, stack.length - 1)
   // Move the cursor back to the target node
-  for (let d = 0; d <= depth; d++) cursor.childAfter(node.from)
+  for (let index of newStack) {
+    let tree = cursor.tree.children[index] as Tree, pos = cursor.tree.positions[index]
+    cursor.yield(new TreeNode(tree, pos + cursor.from, index, cursor._tree))
+  }
 }
 
 class StructureCursor {
