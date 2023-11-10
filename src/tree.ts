@@ -1332,6 +1332,7 @@ function hasChild(tree: Tree): boolean {
 }
 
 const enum Balance { BranchFactor = 8 }
+const enum CutOff { Depth = 2500 }
 
 const enum SpecialRecord {
   Reuse = -1,
@@ -1351,7 +1352,7 @@ function buildTree(data: BuildData) {
 
   function takeNode(parentStart: number, minPos: number,
                     children: (Tree | TreeBuffer)[], positions: number[],
-                    inRepeat: number) {
+                    inRepeat: number, depth: number) {
     let {id, start, end, size} = cursor
     let lookAheadAtStart = lookAhead
     while (size < 0) {
@@ -1392,13 +1393,16 @@ function buildTree(data: BuildData) {
       while (cursor.pos > endPos) {
         if (localInRepeat >= 0 && cursor.id == localInRepeat && cursor.size >= 0) {
           if (cursor.end <= lastEnd - maxBufferLength) {
-            makeRepeatLeaf(localChildren, localPositions, start, lastGroup, cursor.end, lastEnd, localInRepeat, lookAheadAtStart)
+            makeRepeatLeaf(localChildren, localPositions, start, lastGroup, cursor.end, lastEnd,
+                           localInRepeat, lookAheadAtStart)
             lastGroup = localChildren.length
             lastEnd = cursor.end
           }
           cursor.next()
+        } else if (depth > CutOff.Depth) {
+          takeFlatNode(start, endPos, localChildren, localPositions)
         } else {
-          takeNode(start, endPos, localChildren, localPositions, localInRepeat)
+          takeNode(start, endPos, localChildren, localPositions, localInRepeat, depth + 1)
         }
       }
       if (localInRepeat >= 0 && lastGroup > 0 && lastGroup < localChildren.length)
@@ -1415,6 +1419,37 @@ function buildTree(data: BuildData) {
 
     children.push(node)
     positions.push(startPos)
+  }
+
+  function takeFlatNode(parentStart: number, minPos: number,
+                        children: (Tree | TreeBuffer)[], positions: number[]) {
+    let nodes = [] // Temporary, inverted array of leaf nodes found, with absolute positions
+    let nodeCount = 0, stopAt = -1
+    while (cursor.pos > minPos) {
+      let {id, start, end, size} = cursor
+      if (size > 4) { // Not a leaf
+        cursor.next()
+      } else if (stopAt > -1 && start < stopAt) {
+        break
+      } else {
+        if (stopAt < 0) stopAt = end - maxBufferLength
+        nodes.push(id, start, end)
+        nodeCount++
+        cursor.next()
+      }
+    }
+    if (nodeCount) {
+      let buffer = new Uint16Array(nodeCount * 4)
+      let start = nodes[nodes.length - 2]
+      for (let i = nodes.length - 3, j = 0; i >= 0; i -= 3) {
+        buffer[j++] = nodes[i]
+        buffer[j++] = nodes[i + 1] - start
+        buffer[j++] = nodes[i + 2] - start
+        buffer[j++] = j
+      }
+      children.push(new TreeBuffer(buffer, nodes[2] - start, nodeSet))
+      positions.push(start - parentStart)
+    }
   }
 
   function makeBalanced(type: NodeType) {
@@ -1521,7 +1556,7 @@ function buildTree(data: BuildData) {
   }
 
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
-  while (cursor.pos > 0) takeNode(data.start || 0, data.bufferStart || 0, children, positions, -1)
+  while (cursor.pos > 0) takeNode(data.start || 0, data.bufferStart || 0, children, positions, -1, 0)
   let length = data.length ?? (children.length ? positions[0] + children[0].length : 0)
   return new Tree(types[data.topID], children.reverse(), positions.reverse(), length)
 }
