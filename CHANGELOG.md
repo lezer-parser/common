@@ -1,3 +1,15 @@
+## 1.1.1 (2023-11-10)
+
+### Bug fixes
+
+Fix a bug where `resolveStack` could sometimes yield the same node multiple times.
+
+Allow mixed-parsing trees to be mounted for zero-length nodes.
+
+Fix a bug in mixed-language parsing that could some parts of an inner language to be missed when incrementally reparsing from a stopped parse.
+
+In `Tree.build`, when given an extremely deeply nested tree structure, flatten it instead of overflowing the stack.
+
 ## 1.1.0 (2023-09-19)
 
 ### New features
