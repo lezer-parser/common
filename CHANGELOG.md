@@ -1,3 +1,9 @@
+## 1.1.2 (2023-12-07)
+
+### Bug fixes
+
+Fix a crash that could happen in mixed-language parsing when mounting a tree to a zero-length node.
+
 ## 1.1.1 (2023-11-10)
 
 ### Bug fixes
