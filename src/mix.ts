@@ -1,5 +1,5 @@
 import {Tree, TreeBuffer, NodeType, SyntaxNodeRef, SyntaxNode, NodeProp,
-        TreeCursor, MountedTree, Range, IterMode, TreeNode} from "./tree"
+        TreeCursor, MountedTree, Range, IterMode, TreeNode, BufferNode} from "./tree"
 import {Input, Parser, PartialParse, TreeFragment, ParseWrapper} from "./parse"
 
 /// Objects returned by the function passed to
@@ -238,14 +238,11 @@ function sliceBuf(buf: TreeBuffer, startI: number, endI: number, nodes: (Tree | 
 // any other code, making violations of the immutability safe.
 function materialize(cursor: TreeCursor) {
   let {node} = cursor, stack: number[] = []
+  let buffer = (node as BufferNode).context.buffer
   // Scan up to the nearest tree
   do { stack.push(cursor.index); cursor.parent() } while (!cursor.tree)
   // Find the index of the buffer in that tree
-  let i = 0, base = cursor.tree!, off = 0
-  for (;; i++) {
-    off = base.positions[i] + cursor.from
-    if (off <= node.from && off + base.children[i].length >= node.to) break
-  }
+  let base = cursor.tree!, i = base.children.indexOf(buffer)
   let buf = base.children[i] as TreeBuffer, b = buf.buffer, newStack: number[] = [i]
   // Split a level in the buffer, putting the nodes before and after
   // the child that contains `node` into new buffers.

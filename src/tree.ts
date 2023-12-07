@@ -935,7 +935,7 @@ class BufferContext {
               readonly start: number) {}
 }
 
-class BufferNode extends BaseNode {
+export class BufferNode extends BaseNode {
   type: NodeType
 
   get name() { return this.type.name }
