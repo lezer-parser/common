@@ -1,3 +1,9 @@
+## 1.2.0 (2023-12-28)
+
+### New features
+
+The new `NodeProp.isolate` can be used by parser to signal that a given node should be treated as isolated when it comes to bidirectional text rendering.
+
 ## 1.1.2 (2023-12-07)
 
 ### Bug fixes
