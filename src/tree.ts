@@ -924,7 +924,10 @@ export class TreeNode extends BaseNode implements SyntaxNode {
 function getChildren(node: SyntaxNode, type: string | number, before: string | number | null, after: string | number | null): SyntaxNode[] {
   let cur = node.cursor(), result: SyntaxNode[] = []
   if (!cur.firstChild()) return result
-  if (before != null) while (!cur.type.is(before)) if (!cur.nextSibling()) return result
+  if (before != null) for (let found = false; !found;) {
+    found = cur.type.is(before)
+    if (!cur.nextSibling()) return result
+  }
   for (;;) {
     if (after != null && cur.type.is(after)) return result
     if (cur.type.is(type)) result.push(cur.node)
