@@ -1,3 +1,9 @@
+## 1.2.1 (2024-01-16)
+
+### Bug fixes
+
+Fix a bug where `getChild` and `getChildren` would, if the first and second arguments matched the same node, return incorrect results.
+
 ## 1.2.0 (2023-12-28)
 
 ### New features
