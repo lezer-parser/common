@@ -181,7 +181,13 @@ class MixedParse implements PartialParse {
         }
       } else if (overlay && (range = overlay.predicate(cursor))) {
         if (range === true) range = new Range(cursor.from, cursor.to)
-        if (range.from < range.to) overlay.ranges.push(range)
+        if (range.from < range.to) {
+          let last = overlay.ranges.length - 1
+          if (last >= 0 && overlay.ranges[last].to == range.from)
+            overlay.ranges[last] = {from: overlay.ranges[last].from, to: range.to}
+          else
+            overlay.ranges.push(range)
+        }
       }
       if (enter && cursor.firstChild()) {
         if (overlay) overlay.depth++
