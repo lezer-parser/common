@@ -1372,7 +1372,7 @@ function buildTree(data: BuildData) {
                     children: (Tree | TreeBuffer)[], positions: number[],
                     inRepeat: number, depth: number) {
     let {id, start, end, size} = cursor
-    let lookAheadAtStart = lookAhead
+    let lookAheadAtStart = lookAhead, contextAtStart = contextHash
     while (size < 0) {
       cursor.next()
       if (size == SpecialRecord.Reuse) {
@@ -1412,7 +1412,7 @@ function buildTree(data: BuildData) {
         if (localInRepeat >= 0 && cursor.id == localInRepeat && cursor.size >= 0) {
           if (cursor.end <= lastEnd - maxBufferLength) {
             makeRepeatLeaf(localChildren, localPositions, start, lastGroup, cursor.end, lastEnd,
-                           localInRepeat, lookAheadAtStart)
+                           localInRepeat, lookAheadAtStart, contextAtStart)
             lastGroup = localChildren.length
             lastEnd = cursor.end
           }
@@ -1424,14 +1424,15 @@ function buildTree(data: BuildData) {
         }
       }
       if (localInRepeat >= 0 && lastGroup > 0 && lastGroup < localChildren.length)
-        makeRepeatLeaf(localChildren, localPositions, start, lastGroup, start, lastEnd, localInRepeat, lookAheadAtStart)
+        makeRepeatLeaf(localChildren, localPositions, start, lastGroup, start, lastEnd, localInRepeat,
+                       lookAheadAtStart, contextAtStart)
       localChildren.reverse(); localPositions.reverse()
 
       if (localInRepeat > -1 && lastGroup > 0) {
-        let make = makeBalanced(type)
+        let make = makeBalanced(type, contextAtStart)
         node = balanceRange(type, localChildren, localPositions, 0, localChildren.length, 0, end - start, make, make)
       } else {
-        node = makeTree(type, localChildren, localPositions, end - start, lookAheadAtStart - end)
+        node = makeTree(type, localChildren, localPositions, end - start, lookAheadAtStart - end, contextAtStart)
       }
     }
 
@@ -1470,7 +1471,7 @@ function buildTree(data: BuildData) {
     }
   }
 
-  function makeBalanced(type: NodeType) {
+  function makeBalanced(type: NodeType, contextHash: number) {
     return (children: readonly (Tree | TreeBuffer)[], positions: readonly number[], length: number) => {
       let lookAhead = 0, lastI = children.length - 1, last, lookAheadProp
       if (lastI >= 0 && (last = children[lastI]) instanceof Tree) {
@@ -1478,22 +1479,23 @@ function buildTree(data: BuildData) {
         if (lookAheadProp = last.prop(NodeProp.lookAhead))
           lookAhead = positions[lastI] + last.length + lookAheadProp
       }
-      return makeTree(type, children, positions, length, lookAhead)
+      return makeTree(type, children, positions, length, lookAhead, contextHash)
     }
   }
 
   function makeRepeatLeaf(children: (Tree | TreeBuffer)[], positions: number[], base: number, i: number,
-                          from: number, to: number, type: number, lookAhead: number) {
+                          from: number, to: number, type: number, lookAhead: number, contextHash: number) {
     let localChildren = [], localPositions = []
     while (children.length > i) { localChildren.push(children.pop()!); localPositions.push(positions.pop()! + base - from) }
-    children.push(makeTree(nodeSet.types[type], localChildren, localPositions, to - from, lookAhead - to))
+    children.push(makeTree(nodeSet.types[type], localChildren, localPositions, to - from, lookAhead - to, contextHash))
     positions.push(from - base)
   }
 
   function makeTree(type: NodeType,
                     children: readonly (Tree | TreeBuffer)[],
                     positions: readonly number[], length: number,
-                    lookAhead: number = 0,
+                    lookAhead: number,
+                    contextHash: number,
                     props?: readonly [number | NodeProp<any>, any][]) {
     if (contextHash) {
       let pair: [number | NodeProp<any>, any] = [NodeProp.contextHash, contextHash]
