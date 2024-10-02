@@ -324,3 +324,23 @@ describe("TreeCursor", () => {
     ist(c.type, NodeType.none)
   })
 })
+
+describe("matchContext", () => {
+  it("can match on nodes", () => {
+    ist(simple().resolve(10, 1).matchContext(["T", "Pa", "Br"]))
+  })
+
+  it("can match wildcards", () => {
+    ist(simple().resolve(10, 1).matchContext(["T", "", "Br"]))
+  })
+
+  it("can mismatch on nodes", () => {
+    ist(!simple().resolve(10, 1).matchContext(["Q", "Br"]))
+  })
+
+  it("can match on cursor", () => {
+    let c = simple().cursor()
+    for (let i = 0; i < 3; i++) c.enter(15, -1)
+    ist(c.matchContext(["T", "Pa", "Br"]))
+  })
+})

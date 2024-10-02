@@ -815,7 +815,7 @@ abstract class BaseNode implements SyntaxNode {
   }
 
   matchContext(context: readonly string[]): boolean {
-    return matchNodeContext(this, context)
+    return matchNodeContext(this.parent, context)
   }
 
   enterUnfinishedNodesBefore(pos: number) {
@@ -935,8 +935,8 @@ function getChildren(node: SyntaxNode, type: string | number, before: string | n
   }
 }
 
-function matchNodeContext(node: SyntaxNode, context: readonly string[], i = context.length - 1): boolean {
-  for (let p: SyntaxNode | null = node.parent; i >= 0; p = p.parent) {
+function matchNodeContext(node: SyntaxNode | null, context: readonly string[], i = context.length - 1): boolean {
+  for (let p = node; i >= 0; p = p.parent) {
     if (!p) return false
     if (!p.type.isAnonymous) {
       if (context[i] && context[i] != p.name) return false
@@ -1331,10 +1331,10 @@ export class TreeCursor implements SyntaxNodeRef {
   /// of direct parent node names. Empty strings in the context array
   /// are treated as wildcards.
   matchContext(context: readonly string[]): boolean {
-    if (!this.buffer) return matchNodeContext(this.node, context)
+    if (!this.buffer) return matchNodeContext(this.node.parent, context)
     let {buffer} = this.buffer, {types} = buffer.set
     for (let i = context.length - 1, d = this.stack.length - 1; i >= 0; d--) {
-      if (d < 0) return matchNodeContext(this.node, context, i)
+      if (d < 0) return matchNodeContext(this._tree, context, i)
       let type = types[buffer.buffer[this.stack[d]]]
       if (!type.isAnonymous) {
         if (context[i] && context[i] != type.name) return false
