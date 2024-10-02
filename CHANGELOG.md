@@ -1,3 +1,9 @@
+## 1.2.2 (2024-10-02)
+
+### Bug fixes
+
+Fix a bug in `TreeCursor.matchContext` where, if the context fell partially in a buffer node and partially in tree nodes, it could return incorrect results.
+
 ## 1.2.1 (2024-01-16)
 
 ### Bug fixes
