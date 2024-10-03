@@ -74,7 +74,7 @@ First stable version.
 
 ### Bug fixes
 
-Declare `matchContext` as a property of `SytaxNodeRef`.
+Declare `matchContext` as a property of `SyntaxNodeRef`.
 
 ## 0.16.0 (2022-04-20)
 
@@ -322,7 +322,7 @@ Node types have a new `is` method for checking whether their name or one of thei
 
 ### Bug fixes
 
-Fix lezer depencency versions
+Fix lezer dependency versions
 
 ## 0.11.0 (2020-09-26)
 
