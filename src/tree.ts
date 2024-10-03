@@ -1318,8 +1318,8 @@ export class TreeCursor implements SyntaxNodeRef {
       for (;;) {
         if (mustLeave && leave) leave(this)
         mustLeave = this.type.isAnonymous
-        if (this.nextSibling()) break
         if (!depth) return
+        if (this.nextSibling()) break
         this.parent()
         depth--
         mustLeave = true
