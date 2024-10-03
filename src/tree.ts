@@ -522,6 +522,8 @@ type BuildData = {
   nodeSet: NodeSet,
   /// The id of the top node type.
   topID: number,
+  /// The [node props](#common.NodeProp) of the top node.
+  topProps?: readonly [NodeProp<any> | number, any][],
   /// The position the tree should start at. Defaults to 0.
   start?: number,
   /// The position in the buffer where the function should stop
@@ -1578,7 +1580,7 @@ function buildTree(data: BuildData) {
   let children: (Tree | TreeBuffer)[] = [], positions: number[] = []
   while (cursor.pos > 0) takeNode(data.start || 0, data.bufferStart || 0, children, positions, -1, 0)
   let length = data.length ?? (children.length ? positions[0] + children[0].length : 0)
-  return new Tree(types[data.topID], children.reverse(), positions.reverse(), length)
+  return new Tree(types[data.topID], children.reverse(), positions.reverse(), length, data.topProps)
 }
 
 const nodeSizeCache: WeakMap<Tree, number> = new WeakMap
