@@ -469,8 +469,8 @@ export class Tree {
   /// Returns the node's [per-node props](#common.NodeProp.perNode) in a
   /// format that can be passed to the [`Tree`](#common.Tree)
   /// constructor.
-  get propValues(): readonly [NodeProp<any> | number, any][] {
-    let result: [NodeProp<any> | number, any][] = []
+  get propValues(): readonly [number, any][] {
+    let result: [number, any][] = []
     if (this.props) for (let id in this.props) result.push([+id, this.props[id]])
     return result
   }
