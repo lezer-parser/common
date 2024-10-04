@@ -13,7 +13,8 @@ export class Range {
 /// can have metadata associated with it in props. Instances of this
 /// class represent prop names.
 export class NodeProp<T> {
-  /// @internal
+  /// The id of this property type. Exposed for debugging
+  /// [`Tree.propValues`](#common.Tree.propValues).
   id: number
 
   /// Indicates whether this prop is stored per [node
