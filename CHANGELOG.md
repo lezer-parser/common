@@ -1,3 +1,9 @@
+## 1.2.3 (2024-10-16)
+
+### Bug fixes
+
+Fix an issue in `TreeCursor.iterate` that made it iterate through siblings of the current node.
+
 ## 1.2.2 (2024-10-02)
 
 ### Bug fixes
