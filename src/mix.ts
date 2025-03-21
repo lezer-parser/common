@@ -158,8 +158,15 @@ class MixedParse implements PartialParse {
         enter = isCovered != Cover.Full
       } else if (!cursor.type.isAnonymous && (nest = this.nest(cursor, this.input)) &&
                  (cursor.from < cursor.to || !nest.overlay)) {
-        if (!cursor.tree) materialize(cursor)
-
+        if (!cursor.tree) {
+            materialize(cursor);
+            // materialize create one more level of nesting
+            // we need to add depth to active overlay for going backwards
+            if (overlay)
+                overlay.depth++;
+            if (covered)
+                covered.depth++;
+        }
         let oldMounts = fragmentCursor.findMounts(cursor.from, nest.parser)
         if (typeof nest.overlay == "function") {
           overlay = new ActiveOverlay(nest.parser, nest.overlay, oldMounts, this.inner.length,
