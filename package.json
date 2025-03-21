@@ -27,6 +27,7 @@
   "scripts": {
     "watch": "node build.js --watch",
     "prepare": "node build.js",
+    "prepack": "node build.js",
     "test": "mocha"
   }
 }
