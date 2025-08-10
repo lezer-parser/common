@@ -1373,7 +1373,7 @@ function buildTree(data: BuildData) {
                     inRepeat: number, depth: number) {
     let {id, start, end, size} = cursor
     let lookAheadAtStart = lookAhead, contextAtStart = contextHash
-    while (size < 0) {
+    if (size < 0) {
       cursor.next()
       if (size == SpecialRecord.Reuse) {
         let node = reused[id]
@@ -1389,7 +1389,6 @@ function buildTree(data: BuildData) {
       } else {
         throw new RangeError(`Unrecognized record size: ${size}`)
       }
-      ;({id, start, end, size} = cursor)
     }
 
     let type = types[id], node, buffer: {size: number, start: number, skip: number} | undefined
