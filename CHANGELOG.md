@@ -1,3 +1,13 @@
+## 1.3.0 (2025-10-17)
+
+### Bug fixes
+
+Fix an issue where in some situations a nested parse would break highlighting after it.
+
+### New features
+
+Node props may now define a `merge` function that will be used when the prop is added to a node that already has it.
+
 ## 1.2.3 (2024-10-16)
 
 ### Bug fixes
