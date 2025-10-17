@@ -25,6 +25,9 @@ export class NodeProp<T> {
   /// file.
   deserialize: (str: string) => T
 
+  /// @internal
+  combine: ((a: T, b: T) => T) | null
+
   /// Create a new node prop type.
   constructor(config: {
     /// The [deserialize](#common.NodeProp.deserialize) function to
@@ -32,6 +35,11 @@ export class NodeProp<T> {
     /// the prop from a grammar file. Defaults to a function that
     /// raises an error.
     deserialize?: (str: string) => T,
+    /// If configuring another value for this prop when it already
+    /// exists on a node should combine the old and new values, rather
+    /// than overwrite the old value, you can pass a function that
+    /// does the combining here.
+    combine?: (a: T, b: T) => T
     /// By default, node props are stored in the [node
     /// type](#common.NodeType). It can sometimes be useful to directly
     /// store information (usually related to the parsing algorithm)
@@ -44,6 +52,7 @@ export class NodeProp<T> {
     this.deserialize = config.deserialize || (() => {
       throw new Error("This node type doesn't define a deserialize function")
     })
+    this.combine = config.combine || null
   }
 
   /// This is meant to be used with
@@ -281,7 +290,9 @@ export class NodeSet {
         let add = source(type)
         if (add) {
           if (!newProps) newProps = Object.assign({}, type.props)
-          newProps[add[0].id] = add[1]
+          let value = add[1], prop = add[0]
+          if (prop.combine && prop.id in newProps) value = prop.combine(newProps[prop.id], value)
+          newProps[prop.id] = value
         }
       }
       newTypes.push(newProps ? new NodeType(type.name, newProps, type.id, type.flags) : type)
