@@ -718,6 +718,8 @@ export interface SyntaxNode extends SyntaxNodeRef {
   nextSibling: SyntaxNode | null
   /// This node's previous sibling.
   prevSibling: SyntaxNode | null
+  /// Read the given node prop from this node.
+  prop<T>(prop: NodeProp<T>): T | undefined
   /// A [tree cursor](#common.TreeCursor) starting at this node.
   cursor(mode?: IterMode): TreeCursor
   /// Find the node around, before (if `side` is -1), or after (`side`
@@ -805,6 +807,7 @@ abstract class BaseNode implements SyntaxNode {
   abstract nextSibling: SyntaxNode | null
   abstract prevSibling: SyntaxNode | null
   abstract toTree(): Tree
+  abstract prop<T>(prop: NodeProp<T>): T | undefined
 
   cursor(mode: IterMode = 0 as IterMode) { return new TreeCursor(this as any, mode) }
 
@@ -893,6 +896,8 @@ export class TreeNode extends BaseNode implements SyntaxNode {
 
   childAfter(pos: number) { return this.nextChild(0, 1, pos, Side.After) }
   childBefore(pos: number) { return this.nextChild(this._tree.children.length - 1, -1, pos, Side.Before) }
+
+  prop<T>(prop: NodeProp<T>): T | undefined { return this._tree.prop(prop) }
 
   enter(pos: number, side: -1 | 0 | 1, mode = 0) {
     let mounted
@@ -991,6 +996,8 @@ export class BufferNode extends BaseNode {
 
   childAfter(pos: number) { return this.child(1, pos, Side.After) }
   childBefore(pos: number) { return this.child(-1, pos, Side.Before) }
+
+  prop<T>(prop: NodeProp<T>): T | undefined { return this.type.prop(prop) }
 
   enter(pos: number, side: -1 | 0 | 1, mode: IterMode = 0 as IterMode) {
     if (mode & IterMode.ExcludeBuffers) return null
