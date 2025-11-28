@@ -1,3 +1,9 @@
+## 1.4.0 (2025-11-28)
+
+### New features
+
+Provide a `prop` method on the `SyntaxNode` type for more straightforward access to node props.
+
 ## 1.3.0 (2025-10-17)
 
 ### Bug fixes
