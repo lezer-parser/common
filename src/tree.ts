@@ -1553,7 +1553,7 @@ function buildTree(data: BuildData) {
       fork.next()
       while (fork.pos > startPos) {
         if (fork.size < 0) {
-          if (fork.size == SpecialRecord.ContextChange) localSkipped += 4
+          if (fork.size == SpecialRecord.ContextChange || fork.size == SpecialRecord.LookAhead) localSkipped += 4
           else break scan
         } else if (fork.id >= minRepeatType) {
           localSkipped += 4
