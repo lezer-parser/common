@@ -135,7 +135,11 @@ export class MountedTree {
     /// and [`enter`](#common.SyntaxNode.enter).
     readonly overlay: readonly {from: number, to: number}[] | null,
     /// The parser used to create this subtree.
-    readonly parser: Parser
+    readonly parser: Parser,
+    /// [Indicates](#common.IterMode.EnterBracketed) that the nested
+    /// content is delineated with some kind
+    /// of bracket token.
+    readonly bracketed = false
   ) {}
 
   /// @internal
@@ -323,6 +327,11 @@ export enum IterMode {
   /// library to not enter mounted overlays if one covers the given
   /// position.
   IgnoreOverlays = 8,
+  /// When set, positions on the boundary of a mounted overlay tree
+  /// that has its [`bracketed`](#common.NestedParse.bracketed) flag
+  /// set will enter that tree regardless of side. Only supported in
+  /// [`enter`](#common.SyntaxNode.enter), not in cursors.
+  EnterBracketed = 16,
 }
 
 /// A piece of syntax tree. There are two ways to approach these
@@ -869,7 +878,10 @@ export class TreeNode extends BaseNode implements SyntaxNode {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent._tree, e = dir > 0 ? children.length : -1; i != e; i += dir) {
         let next = children[i], start = positions[i] + parent.from
-        if (!checkSide(side, pos, start, start + next.length)) continue
+        if (!((mode & IterMode.EnterBracketed) && next instanceof Tree &&
+              MountedTree.get(next)?.overlay === null && (start >= pos || start + next.length <= pos)) &&
+            !checkSide(side, pos, start, start + next.length))
+          continue
         if (next instanceof TreeBuffer) {
           if (mode & IterMode.ExcludeBuffers) continue
           let index = next.findChild(0, next.buffer.length, dir, pos - start, side)
@@ -880,7 +892,7 @@ export class TreeNode extends BaseNode implements SyntaxNode {
             return new TreeNode(mounted.tree, start, i, parent)
           let inner = new TreeNode(next, start, i, parent)
           return (mode & IterMode.IncludeAnonymous) || !inner.type.isAnonymous ? inner
-            : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, pos, side)
+            : inner.nextChild(dir < 0 ? next.children.length - 1 : 0, dir, pos, side, mode)
         }
       }
       if ((mode & IterMode.IncludeAnonymous) || !parent.type.isAnonymous) return null
@@ -902,10 +914,10 @@ export class TreeNode extends BaseNode implements SyntaxNode {
   enter(pos: number, side: -1 | 0 | 1, mode = 0) {
     let mounted
     if (!(mode & IterMode.IgnoreOverlays) && (mounted = MountedTree.get(this._tree)) && mounted.overlay) {
-      let rPos = pos - this.from
+      let rPos = pos - this.from, enterBracketed = (mode & IterMode.EnterBracketed) && mounted.bracketed
       for (let {from, to} of mounted.overlay) {
-        if ((side > 0 ? from <= rPos : from < rPos) &&
-            (side < 0 ? to >= rPos : to > rPos))
+        if ((side > 0 || enterBracketed ? from <= rPos : from < rPos) &&
+            (side < 0 || enterBracketed ? to >= rPos : to > rPos))
           return new TreeNode(mounted.tree, mounted.overlay[0].from + this.from, -1, this)
       }
     }
@@ -1110,13 +1122,15 @@ export class TreeCursor implements SyntaxNodeRef {
   /// @internal
   index: number = 0
   private bufferNode: BufferNode | null = null
+  /// @internal
+  readonly mode: IterMode
 
   /// @internal
   constructor(
     node: TreeNode | BufferNode,
-    /// @internal
-    readonly mode = 0
+    mode = 0
   ) {
+    this.mode = mode & ~IterMode.EnterBracketed
     if (node instanceof TreeNode) {
       this.yieldNode(node)
     } else {

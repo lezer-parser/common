@@ -26,6 +26,12 @@ export interface NestedParse {
   /// idea to use a function here when the target node is expected to
   /// have a large, deep structure.
   overlay?: readonly {from: number, to: number}[] | ((node: SyntaxNodeRef) => {from: number, to: number} | boolean)
+
+  /// When `true`, indicates that this nested language is surrounded
+  /// by some kind of bracket token, which can be used to make
+  /// iteration [eagerly](#common.IterMode.EnterBracketed) enter such
+  /// trees.
+  bracketed?: boolean
 }
 
 /// Create a parse wrapper that, after the inner parse completes,
@@ -42,6 +48,7 @@ class InnerParse {
     readonly parser: Parser,
     readonly parse: PartialParse,
     readonly overlay: readonly {from: number, to: number}[] | null,
+    readonly bracketed: boolean,
     readonly target: Tree,
     readonly from: number
   ) {}
@@ -62,6 +69,7 @@ class ActiveOverlay {
     readonly mounts: readonly ReusableMount[],
     readonly index: number,
     readonly start: number,
+    readonly bracketed: boolean,
     readonly target: Tree,
     readonly prev: ActiveOverlay | null,
   ) {}
@@ -112,7 +120,7 @@ class MixedParse implements PartialParse {
       // presumably not aliased anywhere else) to hold the information
       // about the inner parse.
       let props = Object.assign(Object.create(null), inner.target.props)
-      props[NodeProp.mounted.id] = new MountedTree(done, inner.overlay, inner.parser)
+      props[NodeProp.mounted.id] = new MountedTree(done, inner.overlay, inner.parser, inner.bracketed)
       ;(inner.target as any).props = props
     }
     return null
@@ -168,7 +176,7 @@ class MixedParse implements PartialParse {
         let oldMounts = fragmentCursor.findMounts(cursor.from, nest.parser)
         if (typeof nest.overlay == "function") {
           overlay = new ActiveOverlay(nest.parser, nest.overlay, oldMounts, this.inner.length,
-                                      cursor.from, cursor.tree!,  overlay)
+                                      cursor.from, !!nest.bracketed, cursor.tree!,  overlay)
         } else {
           let ranges = punchRanges(this.ranges, nest.overlay ||
             (cursor.from < cursor.to ? [new Range(cursor.from, cursor.to)] : []))
@@ -178,6 +186,7 @@ class MixedParse implements PartialParse {
             ranges.length ? nest.parser.startParse(this.input, enterFragments(oldMounts, ranges), ranges)
               : nest.parser.startParse(""),
             nest.overlay ? nest.overlay.map(r => new Range(r.from - cursor.from, r.to - cursor.from)) : null,
+            !!nest.bracketed,
             cursor.tree!,
             ranges.length ? ranges[0].from : cursor.from,
           ))
@@ -209,6 +218,7 @@ class MixedParse implements PartialParse {
                 overlay.parser,
                 overlay.parser.startParse(this.input, enterFragments(overlay.mounts, ranges), ranges),
                 overlay.ranges.map(r => new Range(r.from - overlay!.start, r.to - overlay!.start)),
+                overlay.bracketed,
                 overlay.target,
                 ranges[0].from
               ))
