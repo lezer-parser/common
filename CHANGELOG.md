@@ -1,3 +1,9 @@
+## 1.5.0 (2025-12-22)
+
+### New features
+
+Nested trees can now specify that they are bracketed, and the new `IterMode.EnterBracketed` mode for `enter` will enter such trees regardless the `side` parameter.
+
 ## 1.4.0 (2025-11-28)
 
 ### New features
