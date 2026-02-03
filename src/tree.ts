@@ -877,9 +877,10 @@ export class TreeNode extends BaseNode implements SyntaxNode {
   nextChild(i: number, dir: 1 | -1, pos: number, side: Side, mode: IterMode = 0 as IterMode): TreeNode | BufferNode | null {
     for (let parent: TreeNode = this;;) {
       for (let {children, positions} = parent._tree, e = dir > 0 ? children.length : -1; i != e; i += dir) {
-        let next = children[i], start = positions[i] + parent.from
+        let next = children[i], start = positions[i] + parent.from, mounted
         if (!((mode & IterMode.EnterBracketed) && next instanceof Tree &&
-              MountedTree.get(next)?.overlay === null && (start >= pos || start + next.length <= pos)) &&
+              (mounted = MountedTree.get(next)) && !mounted.overlay && mounted.bracketed &&
+              pos >= start && pos <= start + next.length) &&
             !checkSide(side, pos, start, start + next.length))
           continue
         if (next instanceof TreeBuffer) {
