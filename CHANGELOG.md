@@ -1,3 +1,9 @@
+## 1.5.1 (2026-02-03)
+
+### Bug fixes
+
+Fix a bug that caused `SyntaxNode.enter` to incorrectly enter bracketed mounted trees in some circumstances.
+
 ## 1.5.0 (2025-12-22)
 
 ### New features
