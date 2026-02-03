@@ -1096,7 +1096,7 @@ function stackIterator(tree: Tree, pos: number, side: -1 | 0 | 1): NodeIterator 
       }
     }
   }
-  return layers ? iterStack(layers) : inner as any
+  return layers ? iterStack(layers)! : inner as any
 }
 
 /// A tree cursor object focuses on a given node in a syntax tree, and
