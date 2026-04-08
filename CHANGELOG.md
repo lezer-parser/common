@@ -1,3 +1,9 @@
+## 1.5.2 (2026-04-08)
+
+### Bug fixes
+
+Fix a bug in mixed parsing that could cause the parser to fail to reuse unchanged inner parses.
+
 ## 1.5.1 (2026-02-03)
 
 ### Bug fixes
