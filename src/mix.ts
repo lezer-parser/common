@@ -305,8 +305,14 @@ class StructureCursor {
   moveTo(pos: number) {
     let {cursor} = this, p = pos - this.offset
     while (!this.done && cursor.from < p) {
-      if (cursor.to >= pos && cursor.enter(p, 1, IterMode.IgnoreOverlays | IterMode.ExcludeBuffers)) {}
-      else if (!cursor.next(false)) this.done = true
+      if (cursor.to >= pos && cursor.enter(p, 1, IterMode.IgnoreOverlays | IterMode.ExcludeBuffers)) {
+        // Entered
+      } else if (cursor.to <= pos) {
+        if (!cursor.next(false)) this.done = true
+        // Moved to next node
+      } else {
+        break
+      }
     }
   }
 
