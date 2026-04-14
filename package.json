@@ -21,8 +21,8 @@
   },
   "files": ["dist"],
   "repository": {
-    "type" : "git",
-    "url" : "https://github.com/lezer-parser/common.git"
+    "type": "git",
+    "url": "git+https://code.haverbeke.berlin/lezer/common.git"
   },
   "scripts": {
     "watch": "node build.js --watch",
